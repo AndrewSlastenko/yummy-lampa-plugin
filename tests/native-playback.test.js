@@ -98,13 +98,28 @@ test('late reports cannot change a newer session history',()=>{
     out.timeline.handler(50,600,1200);out.timeline.handler(100,0,0);s.flush();
     assert.equal(s.progress.length,0);assert.equal(s.advanced.length,0);
 });
-test('timeline identity survives signed URL changes and separates voice and episode',()=>{
-    const s=setup(),first=s.api.prepare(s.context,s.item).timeline.hash;
-    assert.equal(s.api.prepare(s.context,{...s.item,url:'https://other/token'}).timeline.hash,first);
-    s.context.selected.data.dubbing='Voice B';assert.notEqual(s.api.prepare(s.context,s.item).timeline.hash,first);
+test('native results identify a launch while progress survives signed URL changes',()=>{
+    const s=setup(),first=s.api.prepare(s.context,s.item);
+    first.timeline.handler(20,240,1200);
+    const stable=Object.keys(s.roads).filter(k=>k!==String(first.timeline.hash))[0];
+    assert.ok(stable,'a separate durable progress identity is stored');
+    assert.equal(s.roads[stable].time,240);
+    const second=s.api.prepare(s.context,{...s.item,url:'https://other/token',time:240});
+    assert.notEqual(second.timeline.hash,first.timeline.hash);
+    assert.equal(second.timeline.time,240);assert.equal(s.roads[stable].time,240);
+    // The Android wrapper can deliver an old result after the same episode was reopened.
+    s.followers[0]({data:{hash:String(first.timeline.hash),road:{time:0,duration:0,percent:100}}});
+    s.flush();assert.equal(s.advanced.length,0);assert.equal(s.progress.length,1);
+    s.followers[0]({data:{hash:String(second.timeline.hash),road:{time:0,duration:0,percent:100}}});
+    s.flush();assert.equal(s.advanced.length,1);assert.equal(s.roads[stable].percent,100);
+    s.context.selected.data.dubbing='Voice B';
+    s.api.prepare(s.context,s.item).timeline.handler(30,360,1200);
+    assert.equal(s.roads[stable].percent,100,'another voice has separate progress');
     s.context.selected.data.dubbing='Voice A';s.context.selected.number='2';
-    assert.notEqual(s.api.prepare(s.context,s.item).timeline.hash,first);
+    s.api.prepare(s.context,s.item).timeline.handler(40,480,1200);
+    assert.equal(s.roads[stable].percent,100,'another episode has separate progress');
 });
+
 test('unknown duration completion remains explicit without inventing a duration',()=>{
     const s=setup();s.context.selected.duration=0;
     s.api.prepare(s.context,s.item).timeline.handler(100,0,0);s.flush();

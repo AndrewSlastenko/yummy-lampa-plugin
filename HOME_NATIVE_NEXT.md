@@ -10,7 +10,7 @@ Replace the official extension URL, then restart Lampa. The unchanged `stable/` 
 
 ## Behavior
 
-- Native launches have stable per-anime/episode/video/voice timelines, compatible with the prior Anime Progress bridge. The bridge passes existing timelines through unchanged.
+- Native launches use distinct numeric result identities so late Android results cannot finish a reopened episode. Durable per-anime/episode/video/voice progress remains compatible with the prior Anime Progress bridge. The bridge passes existing timelines through unchanged.
 - The native playlist has one item. Exact normal completion (`100/0/0` from the Lampa wrapper) records completion and, if the existing auto-next setting is enabled, resolves the next item in the same voice/source group. Back, including near the end, does not auto-advance.
 - Resolution and deferred handoff are guarded by player generation, activity identity and navigation session. Stale or duplicate results cannot open an old episode over a new choice. Missing/unresolvable next streams return to the same episode picker.
 - Local finished/half-watched flags persist without account/list automation. Unknown-duration completion is recognized by Continue Watching.
@@ -28,7 +28,7 @@ node build.js
 node --check dist/index.js
 ```
 
-120 checks passed before device acceptance. New behavior tests cover completion vs Back, duplicate/stale results, late resolver responses, navigation during deferred handoff, source metadata, durationless history and fragment identity. No dependency was added.
+122 checks passed before final device acceptance. New behavior tests cover completion vs Back, duplicate/stale results, late resolver responses, navigation during deferred handoff, source metadata, durationless history and fragment identity. No dependency was added.
 
 ## Rollback
 

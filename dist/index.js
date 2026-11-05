@@ -15392,6 +15392,15 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     function create(deps) {
         var generation = 0, activeHash = null, activeResult = null;
+        // Native results carry only a numeric hash, not a JavaScript callback.
+        // Allocate a different identity for every launch, including reopening
+        // the same episode; keep the durable resume key separate below.
+        var resultSequence = Math.floor(Math.random() * 0x7ffffffe) + 1;
+        function resultHash(progressHash) {
+            do { resultSequence = resultSequence % 0x7fffffff + 1; }
+            while (resultSequence === progressHash);
+            return resultSequence;
+        }
         function cancel() { generation += 1; activeHash = null; activeResult = null; }
         function prepare(context, current) {
             cancel();
@@ -15399,9 +15408,12 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 !deps.timeline || !deps.timeline.view || !deps.timeline.update) return current;
             var session = generation, returned = false;
             var selected = context.selected;
-            var hash = timelineHash(context.card.yani_id, deps.number(selected), selected.video_id, deps.voice(context));
+            var progressHash = timelineHash(context.card.yani_id, deps.number(selected), selected.video_id, deps.voice(context));
+            var hash = resultHash(progressHash);
             var time = Math.max(0, Number(current.time) || 0);
             var duration = Math.max(0, Number(selected.duration) || 0);
+            deps.timeline.update({hash:progressHash,time:time,duration:duration,percent:duration ? time / duration * 100 : 0});
+            // Android.openPlayer rereads this key before serializing its intent.
             deps.timeline.update({hash:hash,time:time,duration:duration,percent:duration ? time / duration * 100 : 0});
             var out = Object.assign({}, current);
             out.timeline = Object.assign({}, deps.timeline.view(hash), {
@@ -15416,6 +15428,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                     if (!finished && length === 0 && position === 0) return;
                     if (finished) position = length = duration;
                     deps.timeline.update({hash:hash,time:position,duration:length,percent:finished ? 100 : percent});
+                    deps.timeline.update({hash:progressHash,time:position,duration:length,percent:finished ? 100 : percent});
                     deps.progress(context, position, length, finished);
                     if (!finished || !deps.enabled()) return;
                     var navigation = deps.beforeAdvance(context);
