@@ -11,8 +11,8 @@
     }
 
     function create(deps) {
-        var generation = 0;
-        function cancel() { generation += 1; }
+        var generation = 0, activeHash = null, activeResult = null;
+        function cancel() { generation += 1; activeHash = null; activeResult = null; }
         function prepare(context, current) {
             cancel();
             if (!context || !context.card || !context.card.yani_id || !context.selected ||
@@ -46,7 +46,17 @@
                     });
                 }
             });
+            activeHash = hash;
+            activeResult = out.timeline.handler;
             return out;
+        }
+        if (deps.timeline && deps.timeline.listener && deps.timeline.listener.follow) {
+            deps.timeline.listener.follow('update', function (event) {
+                var data = event && event.data, road = data && data.road;
+                if (activeResult && data && String(data.hash) === String(activeHash) && road) {
+                    activeResult(road.percent, road.time, road.duration);
+                }
+            });
         }
         function mediaUrl(context,url,mode) {
             var flags={op:1,ed:2,op_ed:3}[mode];

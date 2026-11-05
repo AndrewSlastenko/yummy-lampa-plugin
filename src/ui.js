@@ -5039,7 +5039,8 @@
                 url: item.url,
                 time: Number(item.time || 0),
                 headers: item.headers || null,
-                quality: item.quality || null
+                quality: item.quality || null,
+                timeline: item.timeline
             };
         }).filter(function (item) { return item.url; }) : [];
         var payload = {

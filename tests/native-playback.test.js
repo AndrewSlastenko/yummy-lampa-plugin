@@ -8,12 +8,14 @@ function setup(enabled = true) {
     const file = 'src/ui-native-playback.js';
     if (fs.existsSync(file)) vm.runInNewContext(fs.readFileSync(file, 'utf8'), {window, isFinite, Object, String, Number, Math});
     assert.equal(typeof window.LampaYaniNativePlayback?.create, 'function', 'native playback adapter must exist');
-    const queue = [], roads = {}, progress = [], advanced = [], events = [];
+    const queue = [], roads = {}, progress = [], advanced = [], events = [], followers=[];
     const selected = {number:'1',video_id:11,duration:1200,watched:{end_time:108},data:{dubbing:'Voice A'}};
     const context = {card:{yani_id:42},group:{player:'kodik'},videos:[selected,{number:'2',video_id:12}],selected};
     let current = context, active = true, navigation = 1;
     const api = window.LampaYaniNativePlayback.create({
-        timeline:{view:hash=>roads[hash] || {hash,time:0,duration:0,percent:0},update:r=>roads[r.hash]=r},
+        timeline:{view:hash=>roads[hash] || {hash,time:0,duration:0,percent:0},
+            update:r=>{roads[r.hash]=r;followers.forEach(f=>f({data:{hash:r.hash,road:r}}));},
+            listener:{follow:(event,fn)=>followers.push(fn)}},
         number:v=>v.number, voice:c=>c.selected.data.dubbing,
         isCurrent:(c,token)=>c===current && active && (token === undefined || token === navigation), enabled:()=>enabled,
         progress:(c,time,duration,finished)=>progress.push({c,time,duration,finished}),
@@ -21,7 +23,7 @@ function setup(enabled = true) {
         defer:fn=>queue.push(fn)
     });
     const item = {url:'https://example/one.m3u8',title:'Example · Серия 1',time:108,headers:{Referer:'https://example/'},quality:{'1080p':'https://example/one.m3u8'}};
-    return {api,context,item,roads,queue,progress,advanced,events,
+    return {api,context,item,roads,queue,progress,advanced,events,followers,
         flush:()=>{while(queue.length)queue.shift()();},setCurrent:c=>current=c,leave:()=>active=false,navigate:()=>navigation++};
 }
 
@@ -34,6 +36,29 @@ test('native progress resumes and preserves source metadata without mutating cal
     out.timeline.handler(20,240,1200);
     assert.equal(s.progress[0].time,240);assert.equal(s.progress[0].finished,false);
     assert.equal(s.roads[out.timeline.hash].time,240);assert.equal(s.advanced.length,0);
+});
+
+test('actual Android Timeline.update completion advances once without a timeCall callback',()=>{
+    const s=setup(),out=s.api.prepare(s.context,s.item);
+    assert.equal(s.followers.length,1,'one listener for the native wrapper result path');
+    s.followers[0]({data:{hash:String(out.timeline.hash),road:{time:0,duration:0,percent:100}}});
+    s.flush();assert.equal(s.progress.length,1);assert.equal(s.progress[0].finished,true);
+    assert.equal(s.advanced.length,1);
+});
+
+test('the serialized native playlist retains its current timeline identity',()=>{
+    const source=fs.readFileSync('src/ui.js','utf8');
+    const fragment=source.slice(source.indexOf('    function openExternalVideo('),source.indexOf('    function openExternalUri('));
+    let sent;
+    const Lampa={Activity:{active:()=>({})},Android:{openPlayer:(url,data)=>sent=JSON.parse(JSON.stringify(data))}};
+    const sandbox={Lampa,window:{Lampa},nativePlaybackActivity:null,
+        LampaYaniUiUtils:{normalizeVideoUrl:x=>x},cleanPlaybackTitle:x=>x,prepareExternalRestore(){},
+        tryExternalOpen:(name,fn)=>fn()};
+    vm.runInNewContext(fragment,sandbox);
+    const timeline={hash:12345,time:0,duration:1200,percent:0,handler(){}};
+    assert.equal(sandbox.openExternalVideo('https://cdn/2.mp4','Series2',{
+        timeline,playlist:[{url:'https://cdn/2.mp4',title:'Series2',timeline}]}),true);
+    assert.equal(sent.timeline.hash,12345);assert.equal(sent.playlist[0].timeline?.hash,12345);
 });
 test('real completion records finished progress before exactly one deferred advance',()=>{
     const s=setup(),out=s.api.prepare(s.context,s.item);
