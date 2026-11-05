@@ -1,5 +1,7 @@
 # YummyAnime for Lampa
 
+**Personal Home native playback fork:** external Android auto-next and optional JustPlayer AniSkip integration. See [HOME_NATIVE_NEXT.md](HOME_NATIVE_NEXT.md) for this branch's installation URL, tests and rollback. The upstream documentation below describes the official release.
+
 The official YummyAnime plugin for Lampa. It adds an anime catalog, schedule, ratings, personal lists, and playback from available sources. The interface is designed for TV remotes.
 
 Current version: `0.47.29`
