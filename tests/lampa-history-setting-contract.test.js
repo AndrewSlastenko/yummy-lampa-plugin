@@ -10,7 +10,8 @@ assert.match(ui, /function lampaHistoryEnabled\(\)/);
 assert.match(ui, /findStandardLampaCard\(card\)/,
     'history must use a native Lampa card instead of treating a YummyAnime id as TMDB');
 assert.match(ui, /Lampa\.Favorite\.add\('history', nativeCard\)/);
-assert.match(ui, /function launchResolvedVideo[\s\S]{0,650}addToLampaHistory\(card\)/,
+const resolvedLaunch = ui.slice(ui.indexOf('function launchResolvedVideo'), ui.indexOf('function allohaResolvers'));
+assert.match(resolvedLaunch, /addToLampaHistory\(card\)/,
     'internal and external playback must update Lampa history');
 assert.match(ui, /function openEmbeddedEpisode[\s\S]{0,500}addToLampaHistory\(card\)/,
     'embedded playback must update Lampa history');

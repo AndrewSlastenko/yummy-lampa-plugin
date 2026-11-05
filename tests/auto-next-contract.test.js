@@ -36,10 +36,8 @@ assert.ok(prefetchPolicy.includes('LampaYaniStreamResolver.canResolve(url)'), 'o
 
 // The dialog asking where to play belongs to a deliberate launch. An automatic
 // episode change must continue in the player that is already running.
-assert.ok(
-    menu.includes("var target = options && options.autoAdvance ? 'internal' : playbackTargetPreference();"),
-    'auto-advance must bypass the playback target dialog'
-);
+// Target selection is exercised behaviorally in native-playback.test.js:
+// internal continuation stays internal; external continuation stays external.
 assert.ok(
     source.includes("Lampa.Storage.get('yani_auto_next', false)"),
     'auto-advance must default to disabled'

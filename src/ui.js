@@ -3272,8 +3272,18 @@
     }
 
     function launchVideo(card, group, videos, selected, options) {
+        nativePlayback.cancel();
+        var launchGeneration = ++playbackLaunchGeneration;
         if (card && card.yani_id && selected) videoData.retain(card.yani_id, selected);
         options = options || {};
+        if (options.playbackTarget === 'external') {
+            var callerGuard = options.isCurrent;
+            var navigationSession = playbackReturnState.session;
+            options = Object.assign({}, options, {isCurrent: function () {
+                return playbackLaunchGeneration === launchGeneration &&
+                    playbackReturnState.session === navigationSession && (!callerGuard || callerGuard());
+            }});
+        }
         var url = videoSourceUrl(selected);
         if (!url) {
             Lampa.Noty.show(t('no_videos'));
@@ -3299,9 +3309,10 @@
         }
         if (!isExternalPlayableUrl(url, selected) && window.LampaYaniStreamResolver && LampaYaniStreamResolver.canResolve(url)) {
             selected.yani_stream_origin = url;
-            setLoading(true);
+            if (options.playbackTarget !== 'external') setLoading(true);
             LampaYaniStreamResolver.resolve(url, selected).then(function (result) {
-                setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.playbackTarget !== 'external') setLoading(false);
                 if (result && result.url) {
                     selected.yani_stream_url = result.url;
                     selected.yani_stream_quality = result.quality || '';
@@ -3312,8 +3323,14 @@
                 }
                 launchResolvedVideo(card, group, videos, selected, videoSourceUrl(selected) || url, options);
             }).catch(function (error) {
-                setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.playbackTarget !== 'external') setLoading(false);
                 console.warn('[YummyAnime] Stream resolve failed', error);
+                if (options.playbackTarget === 'external') {
+                    Lampa.Noty.show(t('external_stream_unavailable'));
+                    chooseEpisode(card, group, videos);
+                    return;
+                }
                 if (isVkPlaybackSource(url, group)) {
                     Lampa.Noty.show(t('vk_stream_unavailable'));
                     restorePlaybackInteraction();
@@ -3333,6 +3350,12 @@
 
     function launchResolvedVideo(card, group, videos, selected, url, options) {
         options = options || {};
+        if (options.isCurrent && !options.isCurrent()) return;
+        if (options.playbackTarget === 'external' && !isExternalPlayableUrl(url, selected)) {
+            Lampa.Noty.show(t('external_stream_unavailable'));
+            chooseEpisode(card, group, videos);
+            return;
+        }
         var title = (card.title || 'YummyAnime') + ' · ' + t('episode') + ' ' + (selected.number || selected.index || '?') + ' · ' + group.title;
         if (!options.recovery) selected.yani_internal_recovery = 0;
         playbackContext = {card: card, group: group, videos: videos, selected: selected};
@@ -3413,9 +3436,10 @@
     }
 
     function launchAllohaDirect(card, group, selected, url, chain, options) {
-        setLoading(true);
+        if (options.playbackTarget !== 'external') setLoading(true);
         resolveInOrder(chain).then(function (result) {
-            setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.playbackTarget !== 'external') setLoading(false);
             selected.yani_stream_url = result.url;
             selected.yani_stream_quality = result.quality || '';
             selected.yani_stream_qualities = result.qualities || null;
@@ -3424,8 +3448,14 @@
             selected.yani_stream_source = result.source || 'lampac-alloha';
             launchResolvedVideo(card, group, group.videos || [selected], selected, result.url, options);
         }).catch(function (error) {
-            setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.playbackTarget !== 'external') setLoading(false);
             console.warn('[YummyAnime] Alloha resolve failed; playback blocked', error);
+            if (options.playbackTarget === 'external') {
+                Lampa.Noty.show(t('external_stream_unavailable'));
+                chooseEpisode(card, group, group.videos || [selected]);
+                return;
+            }
             blockAllohaPlayback(card, group, selected, url);
         });
         return true;
@@ -3436,6 +3466,11 @@
         if (selected && isAllohaUrl(url)) selected.yani_alloha_iframe_url = url;
         var chain = allohaResolvers(card, group, selected, url);
         var webAvailable = allohaIframeEnabled();
+        if (!chain.length && options.playbackTarget === 'external') {
+            Lampa.Noty.show(t('external_stream_unavailable'));
+            chooseEpisode(card, group, group.videos || [selected]);
+            return true;
+        }
         if (!chain.length) return blockAllohaPlayback(card, group, selected, url);
 
         // Auto-next must stay uninterrupted. The direct resolver is the only
@@ -3831,9 +3866,13 @@
 
     function openExternalPlayer(current, playlist, card) {
         if (!isAndroidPlatform()) return false;
+        current = nativePlayback.prepare(playbackContext, current);
         return openExternalVideo(current.url, current.title, {
-            playlist: externalPlayablePlaylist(playlist),
+            // YummyAnime resolves the next episode after native completion.
+            // A second native playlist owner could skip or double-open it.
+            playlist: [current],
             time: current.time,
+            timeline: current.timeline,
             poster: card.poster || card.img || '',
             requireDirect: true,
             source: current.source,
@@ -3858,6 +3897,48 @@
     // Set right before playback is dispatched so the watcher knows which title
     // and episode started, whichever of the three entry points ran.
     var playbackContext = null;
+    var playbackLaunchGeneration = 0;
+    var nativePlaybackActivity = null;
+    var nativePlayback = LampaYaniNativePlayback.create({
+        timeline: Lampa.Timeline,
+        number: function (video) { return window.LampaYaniEpisode.valueOf(video); },
+        voice: function (context) { return String(LampaYaniUiUtils.videoData(context.selected).dubbing || ''); },
+        isCurrent: function (context, navigation) {
+            return playbackContext === context && Lampa.Activity.active() === nativePlaybackActivity &&
+                (navigation === undefined || navigation === playbackReturnState.session);
+        },
+        enabled: autoNextEnabled,
+        progress: function (context, time, duration, finished) {
+            if (finished) {
+                context.selected.watched = context.selected.watched || {};
+                context.selected.watched.completed = true;
+            }
+            updatePlaybackProgress(context, time, duration, false);
+        },
+        beforeAdvance: function () {
+            cancelExternalRestore();
+            beginPlaybackNavigation();
+            return playbackReturnState.session;
+        },
+        defer: function (callback) { setTimeout(callback, 200); },
+        advance: function (context) {
+            var next = nextEpisodeVideo(context);
+            if (!next) {
+                Lampa.Noty.show(autoNextEndMessage(context));
+                chooseEpisode(context.card, context.group, context.videos);
+                return;
+            }
+            var activity = nativePlaybackActivity;
+            Lampa.Noty.show(t('auto_next_starting') + ' ' + (next.number || next.index || ''));
+            launchVideo(context.card, context.group, context.videos, next, {
+                autoAdvance: true,
+                playbackTarget: 'external',
+                isCurrent: function () {
+                    return playbackContext === context && Lampa.Activity.active() === activity;
+                }
+            });
+        }
+    });
     var playbackWatcher = null;
     var playbackWatcherGeneration = 0;
     var PLAYER_STARTUP_GRACE_MS = 120000;
@@ -4967,6 +5048,10 @@
             headers: options.headers || null,
             quality: options.quality || null
         };
+        if (options.timeline) {
+            payload.timeline = options.timeline;
+            nativePlaybackActivity = Lampa.Activity.active();
+        }
         if (!options.youtubeIntent) {
             if (tryExternalOpen('Lampa.Android.openPlayer', function () {
                 if (!Lampa.Android || !Lampa.Android.openPlayer) return false;

@@ -246,6 +246,8 @@
 
     // One shared definition of "watched" for the whole plugin, see ui-utils.
     function isFinishedEpisode(entry) {
+        if (entry && !(Number(entry.duration) > 0) && entry.finished_episodes &&
+            entry.finished_episodes[String(entry.number)]) return true;
         var utils = window.LampaYaniUiUtils;
         if (utils && utils.isEpisodeFinished) {
             return utils.isEpisodeFinished(entry && entry.time, entry && entry.duration, entry);

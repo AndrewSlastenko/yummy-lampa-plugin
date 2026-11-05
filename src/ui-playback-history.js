@@ -241,11 +241,15 @@
         }
 
         function maybeAutoManageList(card, saved, video, position, duration) {
-            if (!autoManageListsEnabled() || !card || !card.yani_id || !saved || !window.LampaYaniApi || !window.LampaYaniApi.addToList) return;
+            if (!card || !card.yani_id || !saved) return;
             var episode = window.LampaYaniEpisode.key(window.LampaYaniEpisode.valueOf(video));
             var ratio = Number(duration) > 0 ? Number(position) / Number(duration) : 0;
             if (episode && ratio >= 0.5) saved.half_watched_episodes[episode] = true;
             if (episode && episodeFinished(position, duration, video && video.watched)) saved.finished_episodes[episode] = true;
+            var localHistory = playbackHistory();
+            localHistory[String(card.yani_id)] = saved;
+            persistHistory(localHistory);
+            if (!autoManageListsEnabled() || !window.LampaYaniApi || !window.LampaYaniApi.addToList) return;
 
             var halfCount = Object.keys(saved.half_watched_episodes || {}).length;
             var aired = episodeCeiling(card) || positiveNumber(saved.episodes_aired);

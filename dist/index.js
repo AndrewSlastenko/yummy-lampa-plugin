@@ -8014,11 +8014,15 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         }
 
         function maybeAutoManageList(card, saved, video, position, duration) {
-            if (!autoManageListsEnabled() || !card || !card.yani_id || !saved || !window.LampaYaniApi || !window.LampaYaniApi.addToList) return;
+            if (!card || !card.yani_id || !saved) return;
             var episode = window.LampaYaniEpisode.key(window.LampaYaniEpisode.valueOf(video));
             var ratio = Number(duration) > 0 ? Number(position) / Number(duration) : 0;
             if (episode && ratio >= 0.5) saved.half_watched_episodes[episode] = true;
             if (episode && episodeFinished(position, duration, video && video.watched)) saved.finished_episodes[episode] = true;
+            var localHistory = playbackHistory();
+            localHistory[String(card.yani_id)] = saved;
+            persistHistory(localHistory);
+            if (!autoManageListsEnabled() || !window.LampaYaniApi || !window.LampaYaniApi.addToList) return;
 
             var halfCount = Object.keys(saved.half_watched_episodes || {}).length;
             var aired = episodeCeiling(card) || positiveNumber(saved.episodes_aired);
@@ -8876,7 +8880,9 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         function showDirectPlaybackOptions(card, current, playlist, options) {
             // An automatic episode change must never interrupt viewing with a
             // dialog: playback simply continues where it already was.
-            var target = options && options.autoAdvance ? 'internal' : playbackTargetPreference();
+            var target = options && options.autoAdvance
+                ? (options.playbackTarget === 'external' ? 'external' : 'internal')
+                : playbackTargetPreference();
             var canExternal = androidExternalPlayerAvailable();
             if (target === 'external' && !canExternal) target = 'internal';
             if (target === 'external') return openExternalPlayer(current, playlist, card);
@@ -12044,6 +12050,8 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     // One shared definition of "watched" for the whole plugin, see ui-utils.
     function isFinishedEpisode(entry) {
+        if (entry && !(Number(entry.duration) > 0) && entry.finished_episodes &&
+            entry.finished_episodes[String(entry.number)]) return true;
         var utils = window.LampaYaniUiUtils;
         if (utils && utils.isEpisodeFinished) {
             return utils.isEpisodeFinished(entry && entry.time, entry && entry.duration, entry);
@@ -15373,6 +15381,61 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 (function (window) {
     'use strict';
 
+    function finite(value) { return typeof value === 'number' && isFinite(value); }
+    // Keep the existing Anime Progress extension's timeline identity.
+    function timelineHash(id, number, videoId, voice) {
+        var key = 'home-yani-progress|' + id + '|' + number + '|' + (videoId || '') + '|' + (voice || '');
+        var hash = 0;
+        for (var i = 0; i < key.length; i++) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+        return (hash & 0x7fffffff) || 1;
+    }
+
+    function create(deps) {
+        var generation = 0;
+        function cancel() { generation += 1; }
+        function prepare(context, current) {
+            cancel();
+            if (!context || !context.card || !context.card.yani_id || !context.selected ||
+                !deps.timeline || !deps.timeline.view || !deps.timeline.update) return current;
+            var session = generation, returned = false;
+            var selected = context.selected;
+            var hash = timelineHash(context.card.yani_id, deps.number(selected), selected.video_id, deps.voice(context));
+            var time = Math.max(0, Number(current.time) || 0);
+            var duration = Math.max(0, Number(selected.duration) || 0);
+            deps.timeline.update({hash:hash,time:time,duration:duration,percent:duration ? time / duration * 100 : 0});
+            var out = Object.assign({}, current);
+            out.timeline = Object.assign({}, deps.timeline.view(hash), {
+                hash:hash,
+                handler:function (percent, position, length) {
+                    if (returned || generation !== session || !deps.isCurrent(context)) return;
+                    if (!finite(percent) || !finite(position) || !finite(length) || position < 0 || length < 0) return;
+                    returned = true;
+                    // Lampa's native wrapper maps playback_completion to this
+                    // sentinel; an ordinary Back can also round to 100 percent.
+                    var finished = percent === 100 && position === 0 && length === 0;
+                    if (!finished && length === 0 && position === 0) return;
+                    if (finished) position = length = duration;
+                    deps.timeline.update({hash:hash,time:position,duration:length,percent:finished ? 100 : percent});
+                    deps.progress(context, position, length, finished);
+                    if (!finished || !deps.enabled()) return;
+                    var navigation = deps.beforeAdvance(context);
+                    // Android.timeCall deletes its old callback after returning
+                    // from this handler. Start the next intent on a later turn.
+                    deps.defer(function () {
+                        if (generation === session && deps.isCurrent(context, navigation) && deps.enabled()) deps.advance(context);
+                    });
+                }
+            });
+            return out;
+        }
+        return {prepare:prepare,cancel:cancel};
+    }
+    window.LampaYaniNativePlayback = {create:create};
+}(window));
+
+(function (window) {
+    'use strict';
+
     function t(name) {
         return window.LampaYaniI18n ? LampaYaniI18n.t(name) : name;
     }
@@ -18644,8 +18707,18 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     }
 
     function launchVideo(card, group, videos, selected, options) {
+        nativePlayback.cancel();
+        var launchGeneration = ++playbackLaunchGeneration;
         if (card && card.yani_id && selected) videoData.retain(card.yani_id, selected);
         options = options || {};
+        if (options.playbackTarget === 'external') {
+            var callerGuard = options.isCurrent;
+            var navigationSession = playbackReturnState.session;
+            options = Object.assign({}, options, {isCurrent: function () {
+                return playbackLaunchGeneration === launchGeneration &&
+                    playbackReturnState.session === navigationSession && (!callerGuard || callerGuard());
+            }});
+        }
         var url = videoSourceUrl(selected);
         if (!url) {
             Lampa.Noty.show(t('no_videos'));
@@ -18671,9 +18744,10 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         }
         if (!isExternalPlayableUrl(url, selected) && window.LampaYaniStreamResolver && LampaYaniStreamResolver.canResolve(url)) {
             selected.yani_stream_origin = url;
-            setLoading(true);
+            if (options.playbackTarget !== 'external') setLoading(true);
             LampaYaniStreamResolver.resolve(url, selected).then(function (result) {
-                setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.playbackTarget !== 'external') setLoading(false);
                 if (result && result.url) {
                     selected.yani_stream_url = result.url;
                     selected.yani_stream_quality = result.quality || '';
@@ -18684,8 +18758,14 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 }
                 launchResolvedVideo(card, group, videos, selected, videoSourceUrl(selected) || url, options);
             }).catch(function (error) {
-                setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.playbackTarget !== 'external') setLoading(false);
                 console.warn('[YummyAnime] Stream resolve failed', error);
+                if (options.playbackTarget === 'external') {
+                    Lampa.Noty.show(t('external_stream_unavailable'));
+                    chooseEpisode(card, group, videos);
+                    return;
+                }
                 if (isVkPlaybackSource(url, group)) {
                     Lampa.Noty.show(t('vk_stream_unavailable'));
                     restorePlaybackInteraction();
@@ -18705,6 +18785,12 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     function launchResolvedVideo(card, group, videos, selected, url, options) {
         options = options || {};
+        if (options.isCurrent && !options.isCurrent()) return;
+        if (options.playbackTarget === 'external' && !isExternalPlayableUrl(url, selected)) {
+            Lampa.Noty.show(t('external_stream_unavailable'));
+            chooseEpisode(card, group, videos);
+            return;
+        }
         var title = (card.title || 'YummyAnime') + ' · ' + t('episode') + ' ' + (selected.number || selected.index || '?') + ' · ' + group.title;
         if (!options.recovery) selected.yani_internal_recovery = 0;
         playbackContext = {card: card, group: group, videos: videos, selected: selected};
@@ -18785,9 +18871,10 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     }
 
     function launchAllohaDirect(card, group, selected, url, chain, options) {
-        setLoading(true);
+        if (options.playbackTarget !== 'external') setLoading(true);
         resolveInOrder(chain).then(function (result) {
-            setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.playbackTarget !== 'external') setLoading(false);
             selected.yani_stream_url = result.url;
             selected.yani_stream_quality = result.quality || '';
             selected.yani_stream_qualities = result.qualities || null;
@@ -18796,8 +18883,14 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             selected.yani_stream_source = result.source || 'lampac-alloha';
             launchResolvedVideo(card, group, group.videos || [selected], selected, result.url, options);
         }).catch(function (error) {
-            setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.playbackTarget !== 'external') setLoading(false);
             console.warn('[YummyAnime] Alloha resolve failed; playback blocked', error);
+            if (options.playbackTarget === 'external') {
+                Lampa.Noty.show(t('external_stream_unavailable'));
+                chooseEpisode(card, group, group.videos || [selected]);
+                return;
+            }
             blockAllohaPlayback(card, group, selected, url);
         });
         return true;
@@ -18808,6 +18901,11 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         if (selected && isAllohaUrl(url)) selected.yani_alloha_iframe_url = url;
         var chain = allohaResolvers(card, group, selected, url);
         var webAvailable = allohaIframeEnabled();
+        if (!chain.length && options.playbackTarget === 'external') {
+            Lampa.Noty.show(t('external_stream_unavailable'));
+            chooseEpisode(card, group, group.videos || [selected]);
+            return true;
+        }
         if (!chain.length) return blockAllohaPlayback(card, group, selected, url);
 
         // Auto-next must stay uninterrupted. The direct resolver is the only
@@ -19203,9 +19301,13 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     function openExternalPlayer(current, playlist, card) {
         if (!isAndroidPlatform()) return false;
+        current = nativePlayback.prepare(playbackContext, current);
         return openExternalVideo(current.url, current.title, {
-            playlist: externalPlayablePlaylist(playlist),
+            // YummyAnime resolves the next episode after native completion.
+            // A second native playlist owner could skip or double-open it.
+            playlist: [current],
             time: current.time,
+            timeline: current.timeline,
             poster: card.poster || card.img || '',
             requireDirect: true,
             source: current.source,
@@ -19230,6 +19332,48 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     // Set right before playback is dispatched so the watcher knows which title
     // and episode started, whichever of the three entry points ran.
     var playbackContext = null;
+    var playbackLaunchGeneration = 0;
+    var nativePlaybackActivity = null;
+    var nativePlayback = LampaYaniNativePlayback.create({
+        timeline: Lampa.Timeline,
+        number: function (video) { return window.LampaYaniEpisode.valueOf(video); },
+        voice: function (context) { return String(LampaYaniUiUtils.videoData(context.selected).dubbing || ''); },
+        isCurrent: function (context, navigation) {
+            return playbackContext === context && Lampa.Activity.active() === nativePlaybackActivity &&
+                (navigation === undefined || navigation === playbackReturnState.session);
+        },
+        enabled: autoNextEnabled,
+        progress: function (context, time, duration, finished) {
+            if (finished) {
+                context.selected.watched = context.selected.watched || {};
+                context.selected.watched.completed = true;
+            }
+            updatePlaybackProgress(context, time, duration, false);
+        },
+        beforeAdvance: function () {
+            cancelExternalRestore();
+            beginPlaybackNavigation();
+            return playbackReturnState.session;
+        },
+        defer: function (callback) { setTimeout(callback, 200); },
+        advance: function (context) {
+            var next = nextEpisodeVideo(context);
+            if (!next) {
+                Lampa.Noty.show(autoNextEndMessage(context));
+                chooseEpisode(context.card, context.group, context.videos);
+                return;
+            }
+            var activity = nativePlaybackActivity;
+            Lampa.Noty.show(t('auto_next_starting') + ' ' + (next.number || next.index || ''));
+            launchVideo(context.card, context.group, context.videos, next, {
+                autoAdvance: true,
+                playbackTarget: 'external',
+                isCurrent: function () {
+                    return playbackContext === context && Lampa.Activity.active() === activity;
+                }
+            });
+        }
+    });
     var playbackWatcher = null;
     var playbackWatcherGeneration = 0;
     var PLAYER_STARTUP_GRACE_MS = 120000;
@@ -20339,6 +20483,10 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             headers: options.headers || null,
             quality: options.quality || null
         };
+        if (options.timeline) {
+            payload.timeline = options.timeline;
+            nativePlaybackActivity = Lampa.Activity.active();
+        }
         if (!options.youtubeIntent) {
             if (tryExternalOpen('Lampa.Android.openPlayer', function () {
                 if (!Lampa.Android || !Lampa.Android.openPlayer) return false;

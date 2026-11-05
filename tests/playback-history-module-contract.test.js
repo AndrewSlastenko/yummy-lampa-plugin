@@ -126,3 +126,11 @@ assert.strictEqual(api.getPlayback(77).time, 240);
 assert.strictEqual(api.getPlayback(77).number, '5');
 
 console.log('playback history module contract checks passed');
+
+// Local completion must survive serialization without account/list automation.
+const completedContext = {card:{yani_id:88,title:'Local only'},group:{player:'Kodik'},
+    selected:{number:'2',video_id:8802,duration:1200,watched:{}}};
+api.updatePlaybackProgress(completedContext,1200,1200,false);
+const localCompletion = JSON.parse(storage.yani_playback_history)['88'];
+assert.strictEqual(localCompletion.finished_episodes['2'],true);
+assert.strictEqual(localCompletion.half_watched_episodes['2'],true);

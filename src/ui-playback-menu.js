@@ -585,7 +585,9 @@
         function showDirectPlaybackOptions(card, current, playlist, options) {
             // An automatic episode change must never interrupt viewing with a
             // dialog: playback simply continues where it already was.
-            var target = options && options.autoAdvance ? 'internal' : playbackTargetPreference();
+            var target = options && options.autoAdvance
+                ? (options.playbackTarget === 'external' ? 'external' : 'internal')
+                : playbackTargetPreference();
             var canExternal = androidExternalPlayerAvailable();
             if (target === 'external' && !canExternal) target = 'internal';
             if (target === 'external') return openExternalPlayer(current, playlist, card);
