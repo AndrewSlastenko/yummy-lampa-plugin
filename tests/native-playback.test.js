@@ -96,6 +96,17 @@ test('unsupported caller payload passes through unchanged',()=>{
     const s=setup();assert.equal(s.api.prepare(null,s.item),s.item);
 });
 
+test('anime identifiers reach Home AFR without changing media query or existing fragment',()=>{
+    const s=setup();s.context.card.yani_remote_ids={mal_id:1535};
+    assert.equal(s.api.mediaUrl(s.context,'https://cdn/video?token=a#chapter=2','op_ed'),
+        'https://cdn/video?token=a#chapter=2&homeafr_anime=1535:1:3');
+    assert.equal(s.api.mediaUrl(s.context,'https://cdn/video','ed'),'https://cdn/video#homeafr_anime=1535:1:2');
+    assert.equal(s.api.mediaUrl(s.context,'https://cdn/video','off'),'https://cdn/video');
+    assert.equal(s.api.mediaUrl(s.context,'https://cdn/video','suggest'),'https://cdn/video');
+    s.context.selected.number='1.5';
+    assert.equal(s.api.mediaUrl(s.context,'https://cdn/video','op'),'https://cdn/video');
+});
+
 test('automatic external continuation keeps the Android player, internal continuation stays internal',()=>{
     const window={LampaYani:{},Lampa:{},LampaYaniUiUtils:{}};
     const sandbox={window,Lampa:window.Lampa,LampaYaniUiUtils:window.LampaYaniUiUtils,console};

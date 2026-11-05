@@ -3866,7 +3866,9 @@
 
     function openExternalPlayer(current, playlist, card) {
         if (!isAndroidPlatform()) return false;
+        var playableUrl = current.url;
         current = nativePlayback.prepare(playbackContext, current);
+        current.url = nativePlayback.mediaUrl(playbackContext, current.url, skipPreference());
         return openExternalVideo(current.url, current.title, {
             // YummyAnime resolves the next episode after native completion.
             // A second native playlist owner could skip or double-open it.
@@ -3875,6 +3877,7 @@
             timeline: current.timeline,
             poster: card.poster || card.img || '',
             requireDirect: true,
+            playableUrl: playableUrl,
             source: current.source,
             headers: current.headers || videoStreamHeaders(current.source),
             quality: current.quality || videoStreamQualities(current.source)
@@ -5029,7 +5032,7 @@
     function openExternalVideo(url, title, options) {
         options = options || {};
         url = options.youtubeIntent ? externalTrailerUrl(url) : LampaYaniUiUtils.normalizeVideoUrl(url);
-        if (options.requireDirect && !isExternalPlayableUrl(url, options.source)) return false;
+        if (options.requireDirect && !isExternalPlayableUrl(options.playableUrl || url, options.source)) return false;
         var playlist = Array.isArray(options.playlist) ? options.playlist.map(function (item) {
             return {
                 title: cleanPlaybackTitle(item.title),

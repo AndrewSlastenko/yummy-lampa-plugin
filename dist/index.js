@@ -15428,7 +15428,16 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             });
             return out;
         }
-        return {prepare:prepare,cancel:cancel};
+        function mediaUrl(context,url,mode) {
+            var flags={op:1,ed:2,op_ed:3}[mode];
+            var ids=context && context.card && context.card.yani_remote_ids || {};
+            var id=String(ids.myanimelist_id || ids.mal_id || '');
+            var number=context && context.selected ? String(deps.number(context.selected)) : '';
+            if(!flags || !/^https?:\/\//.test(url) || !/^[1-9][0-9]{0,7}$/.test(id) ||
+                !/^[1-9][0-9]{0,4}$/.test(number) || /(?:#|&)homeafr_anime=/.test(url)) return url;
+            return url+(url.indexOf('#')<0?'#':'&')+'homeafr_anime='+id+':'+number+':'+flags;
+        }
+        return {prepare:prepare,cancel:cancel,mediaUrl:mediaUrl};
     }
     window.LampaYaniNativePlayback = {create:create};
 }(window));
@@ -19301,7 +19310,9 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     function openExternalPlayer(current, playlist, card) {
         if (!isAndroidPlatform()) return false;
+        var playableUrl = current.url;
         current = nativePlayback.prepare(playbackContext, current);
+        current.url = nativePlayback.mediaUrl(playbackContext, current.url, skipPreference());
         return openExternalVideo(current.url, current.title, {
             // YummyAnime resolves the next episode after native completion.
             // A second native playlist owner could skip or double-open it.
@@ -19310,6 +19321,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             timeline: current.timeline,
             poster: card.poster || card.img || '',
             requireDirect: true,
+            playableUrl: playableUrl,
             source: current.source,
             headers: current.headers || videoStreamHeaders(current.source),
             quality: current.quality || videoStreamQualities(current.source)
@@ -20464,7 +20476,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     function openExternalVideo(url, title, options) {
         options = options || {};
         url = options.youtubeIntent ? externalTrailerUrl(url) : LampaYaniUiUtils.normalizeVideoUrl(url);
-        if (options.requireDirect && !isExternalPlayableUrl(url, options.source)) return false;
+        if (options.requireDirect && !isExternalPlayableUrl(options.playableUrl || url, options.source)) return false;
         var playlist = Array.isArray(options.playlist) ? options.playlist.map(function (item) {
             return {
                 title: cleanPlaybackTitle(item.title),
