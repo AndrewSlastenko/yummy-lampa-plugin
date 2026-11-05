@@ -212,3 +212,33 @@ test('stale Alloha errors cannot open an embedded fallback or touch navigation',
     current=false;reject(new Error('offline'));await Promise.resolve();await Promise.resolve();
     assert.deepEqual(effects,[]);
 });
+
+
+test('end of the native voice group returns to its episode picker without launching another source',()=>{
+    const source=fs.readFileSync('src/ui.js','utf8');
+    const fragment=source.slice(source.indexOf('    var nativePlayback ='),source.indexOf('    var playbackWatcher ='));
+    const context={card:{yani_id:42},group:{player:'kodik'},videos:[{number:'37'}]};
+    const picked=[],launched=[];let deps;
+    const sandbox={LampaYaniNativePlayback:{create:d=>{deps=d;return {}; }},
+        Lampa:{Timeline:{},Noty:{show(){}},Activity:{active:()=>null}},
+        autoNextEnabled:()=>true,nextEpisodeVideo:()=>null,autoNextEndMessage:()=> 'last',
+        chooseEpisode:(...a)=>picked.push(a),launchVideo:(...a)=>launched.push(a)};
+    vm.runInNewContext(fragment,sandbox);deps.advance(context);
+    assert.deepEqual(picked,[[context.card,context.group,context.videos]]);
+    assert.equal(launched.length,0);
+});
+
+test('unavailable automatic native stream returns to the same source picker',async()=>{
+    const source=fs.readFileSync('src/ui.js','utf8');
+    const fragment=source.slice(source.indexOf('    function launchAllohaDirect('),source.indexOf('    function launchAllohaPlayer('));
+    const picked=[],fallback=[];let reject;
+    const context={card:{yani_id:42},group:{videos:[{number:'2'}]}};
+    const sandbox={resolveInOrder:()=>new Promise((a,b)=>reject=b),setLoading(){},console:{warn(){}},
+        chooseEpisode:(...a)=>picked.push(a),blockAllohaPlayback:()=>fallback.push(true),
+        Lampa:{Noty:{show(){}}},t:x=>x};
+    vm.runInNewContext(fragment,sandbox);
+    sandbox.launchAllohaDirect(context.card,context.group,context.group.videos[0],'https://provider/2',[],
+        {playbackTarget:'external',autoAdvance:true,isCurrent:()=>true});
+    reject(new Error('unavailable'));await Promise.resolve();await Promise.resolve();
+    assert.deepEqual(picked,[[context.card,context.group,context.group.videos]]);assert.deepEqual(fallback,[]);
+});

@@ -28,7 +28,7 @@ node build.js
 node --check dist/index.js
 ```
 
-122 checks passed before final device acceptance. New behavior tests cover completion vs Back, duplicate/stale results, late resolver responses, navigation during deferred handoff, source metadata, durationless history and fragment identity. No dependency was added.
+124 checks passed. GX1 acceptance:2→3 and final9→10 retained Kodik/2x2 and JustPlayer; Back stopped, saved episode/voice returned. Opening/ending skip and OK cancellation passed with Home AFR .5. Last-episode and unavailable-next picker behavior is unit-tested rather than separately played to EOF on hardware. New behavior tests cover completion vs Back, duplicate/stale results, late resolver responses, navigation during deferred handoff, source metadata, durationless history and fragment identity. No dependency was added.
 
 ## Rollback
 
