@@ -98,6 +98,7 @@ async function browser() {
             log(`launching chromium (headless=${HEADLESS})`);
             return playwright.chromium.launch({
                 headless: HEADLESS,
+                chromiumSandbox: process.env.YANI_RESOLVER_SANDBOX === 'true',
                 args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio', '--disable-dev-shm-usage']
             });
         })();
@@ -218,6 +219,15 @@ function sendJson(response, status, payload) {
 }
 
 function playbackBase(request) {
+    const configured = String(process.env.YANI_RESOLVER_PUBLIC_BASE || '').trim();
+    if (configured) {
+        let parsed;
+        try { parsed = new URL(configured); } catch (error) { throw new Error('Invalid resolver public base'); }
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+            throw new Error('Invalid resolver public base');
+        }
+        return parsed.toString().replace(/\/+$/, '');
+    }
     const host = request.headers.host || `127.0.0.1:${PORT}`;
     return `http://${host}`;
 }
@@ -408,6 +418,7 @@ if (require.main === module) {
 
 module.exports = {
     server,
+    playbackBase,
     rewritePlaylist,
     parseStreamPath,
     encodeTarget,

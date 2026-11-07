@@ -226,7 +226,10 @@ class AllohaSession {
         const sources = payload && payload.hlsSource;
         if (!Array.isArray(sources)) return;
         const found = {};
-        sources.forEach((source) => {
+        // Alloha supplies one ladder per audio track. Preserve the player's
+        // selected/default track rather than mixing qualities from voices.
+        const selected = sources.find((source) => source && source.default === true) || sources[0];
+        (selected ? [selected] : []).forEach((source) => {
             const quality = source && source.quality;
             if (!quality) return;
             Object.keys(quality).forEach((label) => {
