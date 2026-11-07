@@ -19,6 +19,7 @@ const options = {onSelect: (video, back) => {chosen = video; restore = back;}, o
 const action = name => screen.items.find(row => row.action === name);
 const episode = number => screen.items.find(row => row.video && row.video.number === number);
 browser.open(card, group, videos, options);
+assert.equal(screen.items[0].action, 'ranges', 'range and jump controls are reachable above the episode list');
 assert.ok(episode(287));
 assert.ok(screen.items[screen.selected].video.number === 287);
 assert.ok(episode(287).title.includes('▶'));
@@ -48,6 +49,8 @@ restore();
 assert.strictEqual(screen.items[screen.selected].video.number, 290);
 progress = {number: 340}; restore();
 assert.strictEqual(screen.items[screen.selected].video.number, 340);
+progress.finished_episodes = {339: true}; restore();
+assert.ok(episode(339).title.includes('✓'), 'local completed history marks the episode without title-renderer support');
 screen.onSelect(action('ranges'));
 const ranges = screen;
 assert.strictEqual(ranges.items.filter(row => row.range !== undefined).length, 15);

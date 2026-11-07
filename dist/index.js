@@ -8400,13 +8400,21 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 var selected = 0;
                 var items = indices.map(function (index, row) {
                     var video = videos[index], label = title(card, video);
+                    var watched = video.watched || {};
+                    var duration = Number(video.duration || watched.duration || 0);
+                    var finished = current && current.finished_episodes && current.finished_episodes[String(value(video))] ||
+                        watched.completed || watched.finished || duration > 0 && Number(watched.end_time || watched.time || 0) / duration >= 0.95;
+                    if (finished && label.indexOf('✓') < 0) label = '✓ ' + label;
                     if (current && same(value(video), current.number) && label.indexOf('▶') < 0) label = '▶ ' + label;
                     if (index === state.index) selected = row;
                     return {title: label, video: video, episodeIndex: index, selected: index === state.index};
                 });
                 state.range = range;
                 if (!items.length) items.push({title: 'Нет доступных серий', action: 'empty'});
-                actions(items, videos.length > 40 || metadata);
+                var controls = [];
+                actions(controls, videos.length > 40 || metadata);
+                selected += controls.length;
+                items = controls.concat(items);
                 var reopen = function () { showEpisodes(range, back); };
                 deps.showSelect({title: 'Выбрать серию' + (group.title ? ' · ' + group.title : ''), items: items, selected: selected,
                     onBack: function () { if (back) back(); else parentBack(); return false; },
