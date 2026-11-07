@@ -89,9 +89,27 @@
     var isNativeAnimeCard = standardCard.isNativeAnimeCard;
     var installFullRating = standardCard.installFullRating;
 
+    var playbackOperations = LampaYaniPlaybackOperation.create({
+        lampa: Lampa,
+        onCancel: function () { restorePlaybackInteraction(); }
+    });
+    function beginPlaybackOperation(message, options) { return playbackOperations.begin(message, options); }
+    var nativeCardActions = LampaYaniNativeCardActions.create({
+        lampa: Lampa, $: $,
+        openPlayback: function (movie, options) { return openYummyForMovie(movie, options); },
+        resolveCard: function (movie) {
+            return findYummyMatches(movie).then(function (matches) { return matches.length === 1 ? matches[0] : null; });
+        },
+        getPlayback: function (card) { return getPlayback(card.yani_id); }
+    });
+    $(document).on('yani:watch-progress', function () { nativeCardActions.refresh(); });
+    window.addEventListener('focus', function () { nativeCardActions.refresh(); }, false);
 
     var playbackMenu = LampaYaniPlaybackMenu.create({
         t: t,
+        beginOperation: beginPlaybackOperation,
+        clearEpisodeProgress: function (card, videos) { return clearEpisodeProgress(card, videos); },
+        chooseSource: function () { openNativeSourceChoices(); },
         showYummySelect: function (params, snapshot) { return showYummySelect(params, snapshot); },
         currentControllerName: function () { return currentControllerName(); },
         listActionTitle: function (card, key) { return listActionTitle(card, key); },
@@ -340,6 +358,21 @@
                         $: $,
                         isAnime: function (movie) { return Boolean(movie.yani_card) || standardCard.isNativeAnimeCard(movie); },
                         openPlayback: openYummyForMovie,
+                        decorateCard: function (owner, movie, render, link) {
+                            var language = String(movie.original_language || movie.language || '').toLowerCase();
+                            if (!movie.yani_card && language !== 'ja') return;
+                            nativeCardActions.decorate(owner, movie, render);
+                            var start = link && link.items && link.items[0];
+                            if (start && start.emit && !start.__yaniActions) {
+                                start.__yaniActions = true;
+                                var emit = start.emit;
+                                start.emit = function (name) {
+                                    var result = emit.apply(this, arguments);
+                                    if (name === 'groupButtons') nativeCardActions.refresh();
+                                    return result;
+                                };
+                            }
+                        },
                         openSearch: function (onBack) { getSearchController().openNative(onBack); }
                     });
                     registerAndroidDirectVideoTube();
@@ -3142,31 +3175,40 @@
         getSearchController().register();
     }
 
-    function openYummyForMovie(movie) {
+    function openNativeSourceChoices() {
+        var owner = Lampa.Activity && Lampa.Activity.active && Lampa.Activity.active();
+        var render = owner && owner.activity && owner.activity.render && owner.activity.render();
+        cancelExternalRestore();
+        clearPlaybackReturn();
+        if (Lampa.Controller && Lampa.Controller.toggle) Lampa.Controller.toggle('content');
+        if (render && Lampa.Activity.active() === owner) render.find('.yani-other-sources').trigger('hover:enter');
+    }
+
+    function openYummyForMovie(movie, options) {
         beginPlaybackNavigation();
-        if (movie && movie.yani_card) return openVideos(movie.yani_card);
-        if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+        if (movie && movie.yani_card) return openVideos(movie.yani_card, options);
+        var operation = beginPlaybackOperation('Ищу аниме в YummyAnime…');
+        function failed(message) {
+            operation.fail({message: message, retry: function () { openYummyForMovie(movie, options); }, alternate: openNativeSourceChoices});
+        }
         findYummyMatches(movie).then(function (matches) {
-            if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+            if (!operation.current()) return;
             if (!matches.length) {
-                Lampa.Noty.show(t('no_yummy_match'));
-                restorePlaybackInteraction();
+                failed(t('no_yummy_match'));
                 return;
             }
-            if (matches.length === 1) return openVideos(matches[0]);
+            if (!operation.finish()) return;
+            if (matches.length === 1) { movie.yani_card = matches[0]; return openVideos(matches[0], options); }
 
             showPlaybackSelect({
                 title: t('choose_anime'),
                 items: matches.map(function (card) {
                     return {title: card.title + (card.release_date ? ' · ' + card.release_date : ''), card: card};
                 }),
-                onSelect: function (item) { openVideos(item.card); }
+                onSelect: function (item) { movie.yani_card = item.card; openVideos(item.card, options); }
             });
         }).catch(function (error) {
-            if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
-            console.error('[YummyAnime Search Source]', error);
-            Lampa.Noty.show(t('catalog_load_error'));
-            restorePlaybackInteraction();
+            failed(t('catalog_load_error'));
         });
     }
 
@@ -3286,12 +3328,16 @@
         var launchGeneration = ++playbackLaunchGeneration;
         if (card && card.yani_id && selected) videoData.retain(card.yani_id, selected);
         options = options || {};
-        if (options.playbackTarget === 'external') {
+        var retryOptions = options.yaniRetryOptions || options;
+        {
             var callerGuard = options.isCurrent;
             var navigationSession = playbackReturnState.session;
-            options = Object.assign({}, options, {isCurrent: function () {
+            var launchOwner = typeof Lampa !== 'undefined' && Lampa.Activity && Lampa.Activity.active ? Lampa.Activity.active() : null;
+            options = Object.assign({}, options, {yaniRetryOptions: retryOptions, isCurrent: function () {
                 return playbackLaunchGeneration === launchGeneration &&
-                    playbackReturnState.session === navigationSession && (!callerGuard || callerGuard());
+                    playbackReturnState.session === navigationSession &&
+                    (typeof Lampa === 'undefined' || !Lampa.Activity || !Lampa.Activity.active || Lampa.Activity.active() === launchOwner) &&
+                    (!callerGuard || callerGuard());
             }});
         }
         var url = videoSourceUrl(selected);
@@ -3319,10 +3365,15 @@
         }
         if (!isExternalPlayableUrl(url, selected) && window.LampaYaniStreamResolver && LampaYaniStreamResolver.canResolve(url)) {
             selected.yani_stream_origin = url;
-            if (options.playbackTarget !== 'external') setLoading(true);
+            var streamOperation = options.autoAdvance ? null : beginPlaybackOperation('Получение видеопотока');
+            if (!streamOperation && options.playbackTarget !== 'external') setLoading(true);
             LampaYaniStreamResolver.resolve(url, selected).then(function (result) {
-                if (options.isCurrent && !options.isCurrent()) return;
-                if (options.playbackTarget !== 'external') setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) {
+                    if (streamOperation) streamOperation.finish();
+                    return;
+                }
+                if (streamOperation && !streamOperation.finish()) return;
+                if (!streamOperation && options.playbackTarget !== 'external') setLoading(false);
                 if (result && result.url) {
                     selected.yani_stream_url = result.url;
                     selected.yani_stream_quality = result.quality || '';
@@ -3333,7 +3384,19 @@
                 }
                 launchResolvedVideo(card, group, videos, selected, videoSourceUrl(selected) || url, options);
             }).catch(function (error) {
-                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.isCurrent && !options.isCurrent()) {
+                    if (streamOperation) streamOperation.finish();
+                    return;
+                }
+                if (streamOperation) {
+                    if (!streamOperation.current()) return;
+                    streamOperation.fail({
+                        message: 'Не удалось получить видео',
+                        retry: function () { launchVideo(card, group, videos, selected, retryOptions); },
+                        alternate: function () { chooseEpisode(card, group, videos, {chooseSource: true, episode: selected}); }
+                    });
+                    return;
+                }
                 if (options.playbackTarget !== 'external') setLoading(false);
                 console.warn('[YummyAnime] Stream resolve failed', error);
                 if (options.playbackTarget === 'external') {
@@ -3446,10 +3509,16 @@
     }
 
     function launchAllohaDirect(card, group, selected, url, chain, options) {
-        if (options.playbackTarget !== 'external') setLoading(true);
+        options = options || {};
+        var streamOperation = options.autoAdvance ? null : beginPlaybackOperation('Получение видеопотока Alloha');
+        if (!streamOperation && options.playbackTarget !== 'external') setLoading(true);
         resolveInOrder(chain).then(function (result) {
-            if (options.isCurrent && !options.isCurrent()) return;
-            if (options.playbackTarget !== 'external') setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) {
+                if (streamOperation) streamOperation.finish();
+                return;
+            }
+            if (streamOperation && !streamOperation.finish()) return;
+            if (!streamOperation && options.playbackTarget !== 'external') setLoading(false);
             selected.yani_stream_url = result.url;
             selected.yani_stream_quality = result.quality || '';
             selected.yani_stream_qualities = result.qualities || null;
@@ -3458,7 +3527,19 @@
             selected.yani_stream_source = result.source || 'lampac-alloha';
             launchResolvedVideo(card, group, group.videos || [selected], selected, result.url, options);
         }).catch(function (error) {
-            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.isCurrent && !options.isCurrent()) {
+                if (streamOperation) streamOperation.finish();
+                return;
+            }
+            if (streamOperation) {
+                if (!streamOperation.current()) return;
+                streamOperation.fail({
+                    message: 'Не удалось получить видео',
+                    retry: function () { launchAllohaDirect(card, group, selected, url, chain, options); },
+                    alternate: function () { chooseEpisode(card, group, group.videos || [selected], {chooseSource: true, episode: selected}); }
+                });
+                return;
+            }
             if (options.playbackTarget !== 'external') setLoading(false);
             console.warn('[YummyAnime] Alloha resolve failed; playback blocked', error);
             if (options.playbackTarget === 'external') {
@@ -5574,12 +5655,6 @@
             component: 'yani',
             param: {name: 'yani_lampa_card_rating', type: 'trigger', default: true},
             field: {name: t('lampa_card_rating'), description: t('lampa_card_rating_description')}
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'yani',
-            param: {name: 'yani_lampa_card_button', type: 'trigger', default: true},
-            field: {name: t('lampa_card_button'), description: t('lampa_card_button_description')}
         });
 
         Lampa.SettingsApi.addParam({

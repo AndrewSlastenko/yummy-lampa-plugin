@@ -8306,6 +8306,140 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 (function (window) {
     'use strict';
 
+    function create(deps) {
+        var memory = {};
+        function open(card, group, videos, options) {
+            card = card || {};
+            group = group || {};
+            options = options || {};
+            videos = videos || [];
+            var key = JSON.stringify([card.yani_id || card.id || '', group.title || group.voice || '', group.player || group.provider || '']);
+            var state = memory[key] || (memory[key] = {});
+            var value = deps.value || function (video) { return video.number; };
+            var title = deps.title || function (unused, video) { return 'Серия ' + value(video); };
+            var chunks = [], metadata = false;
+            var restoreParent;
+            function playback() { return deps.getPlayback ? deps.getPlayback(card.yani_id || card.id) : null; }
+            function same(a, b) { return a !== undefined && a !== null && b !== undefined && b !== null && String(a) === String(b); }
+            function find(number) {
+                for (var i = 0; i < videos.length; i++) if (same(value(videos[i]), number)) return i;
+                return -1;
+            }
+            function meta(video) {
+                var data = video.data || {};
+                var arc = video.arc_title || video.arc_name || video.arc || data.arc_title || data.arc_name || data.arc;
+                var season = video.season_title || video.season_name || video.season || data.season_title || data.season_name || data.season;
+                if (arc && typeof arc !== 'object') return String(arc);
+                if (season && typeof season !== 'object') return /^\d+$/.test(String(season)) ? 'Сезон ' + season : String(season);
+                return '';
+            }
+            videos.forEach(function (video) { if (meta(video)) metadata = true; });
+            videos.forEach(function (video, index) {
+                var label = metadata ? meta(video) : '';
+                var last = chunks[chunks.length - 1];
+                if (!last || last.meta !== label || last.indices.length >= 25) {
+                    last = {meta: label, indices: []};
+                    chunks.push(last);
+                }
+                last.indices.push(index);
+            });
+            function rangeOf(index) {
+                for (var i = 0; i < chunks.length; i++) if (chunks[i].indices.indexOf(index) >= 0) return i;
+                return 0;
+            }
+            function rangeTitle(chunk) {
+                var first = value(videos[chunk.indices[0]]), last = value(videos[chunk.indices[chunk.indices.length - 1]]);
+                var neutral = 'Серии ' + (first === undefined || first === null || first === '' ? chunk.indices[0] + 1 : first) + '–' + (last === undefined || last === null || last === '' ? chunk.indices[chunk.indices.length - 1] + 1 : last);
+                return chunk.meta ? chunk.meta + ' · ' + neutral : neutral;
+            }
+            function parentBack() { if (options.onBack) options.onBack(); return false; }
+            function restore() {
+                var latest = playback();
+                if (latest && !same(latest.number, state.progress)) {
+                    var current = find(latest.number);
+                    if (current >= 0) { state.index = current; state.range = rangeOf(current); }
+                    state.progress = latest.number;
+                }
+                showEpisodes(state.range || 0, restoreParent);
+                return false;
+            }
+            function jump(back, parent) {
+                deps.input({title: 'Перейти к серии', value: '', free: true, nosave: true, layout: 'nums', keyboard: 'lampa'}, function (number) {
+                    var index = find(String(number === undefined || number === null ? '' : number).replace(',', '.').trim());
+                    if (index >= 0) { state.index = index; state.range = rangeOf(index); showEpisodes(state.range, parent); }
+                    else back();
+                });
+                return false;
+            }
+            function actions(items, ranges) {
+                if (ranges) items.push({title: 'Диапазоны серий', action: 'ranges'});
+                items.push({title: 'Перейти к серии…', action: 'jump'});
+                if (options.onVoices) items.push({title: 'Выбрать озвучку', action: 'voices'});
+                if (options.resettable && options.onReset) items.push({title: 'Сбросить прогресс серий', action: 'reset'});
+            }
+            function handle(item, back, parent) {
+                if (item.action === 'jump') return jump(back, parent);
+                if (item.action === 'voices') return options.onVoices();
+                if (item.action === 'reset') return options.onReset(restore);
+            }
+            function showRanges(back) {
+                var items = chunks.map(function (chunk, index) { return {title: rangeTitle(chunk), range: index}; });
+                actions(items, false);
+                deps.showSelect({title: metadata ? 'Сезоны и арки' : 'Диапазоны серий', items: items, selected: state.range || 0,
+                    onBack: function () { back(); return false; },
+                    onSelect: function (item) {
+                        if (item.range !== undefined) {
+                            state.range = item.range;
+                            showEpisodes(item.range, function () { showRanges(back); });
+                        } else handle(item, function () { showRanges(back); }, function () { showRanges(back); });
+                    }});
+            }
+            function showEpisodes(range, back) {
+                var indices = videos.length > 40 || metadata ? (chunks[range] ? chunks[range].indices : []) : videos.map(function (video, index) { return index; });
+                var current = playback();
+                var selected = 0;
+                var items = indices.map(function (index, row) {
+                    var video = videos[index], label = title(card, video);
+                    if (current && same(value(video), current.number) && label.indexOf('▶') < 0) label = '▶ ' + label;
+                    if (index === state.index) selected = row;
+                    return {title: label, video: video, episodeIndex: index, selected: index === state.index};
+                });
+                state.range = range;
+                if (!items.length) items.push({title: 'Нет доступных серий', action: 'empty'});
+                actions(items, videos.length > 40 || metadata);
+                var reopen = function () { showEpisodes(range, back); };
+                deps.showSelect({title: 'Выбрать серию' + (group.title ? ' · ' + group.title : ''), items: items, selected: selected,
+                    onBack: function () { if (back) back(); else parentBack(); return false; },
+                    onSelect: function (item) {
+                        if (item.video) {
+                            state.index = item.episodeIndex;
+                            restoreParent = back;
+                            var saved = playback(); state.progress = saved && saved.number;
+                            if (options.onSelect) options.onSelect(item.video, function () {
+                                var result = restore();
+                                return result;
+                            });
+                        } else if (item.action === 'ranges') showRanges(reopen);
+                        else handle(item, reopen, back);
+                    }});
+            }
+            var saved = playback(), current = saved ? find(saved.number) : -1;
+            if (state.index === undefined || (saved && !same(saved.number, state.progress))) {
+                state.index = current >= 0 ? current : 0;
+                state.range = rangeOf(state.index);
+            }
+            state.progress = saved && saved.number;
+            if (metadata && videos.length <= 40) showRanges(parentBack);
+            else showEpisodes(state.range || 0);
+        }
+        return {open: open};
+    }
+    window.LampaYaniEpisodeBrowser = {create: create};
+})(window);
+
+(function (window) {
+    'use strict';
+
     // Playback select windows, return-focus helpers, and the voice/episode menus.
     // Stream launch, Alloha policy, and player watchers stay in ui.js.
 
@@ -8351,6 +8485,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         var cancelExternalRestore = deps.cancelExternalRestore || function () {};
         var playbackSession = 0;
         var restoreTimer = null;
+        var episodeBrowser = null;
         var playbackReturnState = {
             active: false,
             session: 0,
@@ -8379,6 +8514,10 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             return voiceGroupPart(value);
         }
 
+        function savedPlayerMatches(group, player) {
+            return groupPart(group && (group.player || group.provider || group.source)) === groupPart(player);
+        }
+
         function lastWatchedVoice(voices, card) {
             var playback = card && (card.yani_resume || getPlayback(card.yani_id));
             if (!voices || !voices.length) return null;
@@ -8399,6 +8538,8 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             }
             var videoId = playback.video_id ? String(playback.video_id) : '';
             var byVideo = videoId && voices.filter(function (voice) {
+                if (playback.voice && normalizeVoiceName(voice.group.title) !== normalizeVoiceName(playback.voice)) return false;
+                if (playback.player && !savedPlayerMatches(voice.group, playback.player)) return false;
                 return voice.group && voice.group.videos && voice.group.videos.some(function (video) {
                     return String(video.video_id || video.id || '') === videoId;
                 });
@@ -8411,9 +8552,9 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             });
             if (playback.player) {
                 var withPlayer = named.filter(function (voice) {
-                    return playerMatchesPreference(voice.group, playback.player);
+                        return savedPlayerMatches(voice.group, playback.player);
                 });
-                if (withPlayer.length) return withPlayer[0];
+                return withPlayer[0] || null;
             }
             return named[0] || null;
         }
@@ -8466,7 +8607,8 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             return {
                 controller: playbackReturnState.controller || 'content',
                 element: playbackReturnState.element,
-                collection: playbackReturnState.collection
+                collection: playbackReturnState.collection,
+                reopen: playbackReturnState.reopen
             };
         }
 
@@ -8475,11 +8617,19 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             playbackReturnState.controller = 'content';
             playbackReturnState.element = null;
             playbackReturnState.collection = null;
+            playbackReturnState.reopen = null;
         }
 
         function restorePlaybackInteraction(snapshot, options) {
             snapshot = snapshot && snapshot.controller ? snapshot : playbackReturnSnapshot();
             options = options || {};
+            var reopen = snapshot.reopen || playbackReturnState.reopen;
+            if (reopen) {
+                playbackReturnState.reopen = null;
+                if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+                reopen();
+                return;
+            }
             var timeout = Math.max(0, Number(options.timeout) || 2400);
             var interval = Math.max(50, Number(options.interval) || 120);
             var deadline = Date.now() + timeout;
@@ -8548,7 +8698,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             };
             params.onBack = function () {
                 if (settled) return;
-                if (originalBack) originalBack();
+                if (originalBack && originalBack() === false) return false;
                 restorePlaybackInteraction();
             };
             // Chained voice/episode/player windows own return focus themselves.
@@ -8654,6 +8804,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                     groups[key] = {
                         title: title,
                         player: data.player || data.source || data.service || '',
+                        provider: provider,
                         quality: videoQualityLabel(video),
                         source: source,
                         videos: [],
@@ -8691,17 +8842,22 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         }
 
         function openVideos(card, resume) {
+            var openOptions = resume && typeof resume === 'object' ? resume : {resume: Boolean(resume)};
+            resume = Boolean(openOptions.resume && !openOptions.chooseEpisode);
             beginPlaybackNavigation();
+            playbackReturnState.reopen = null;
             if (!card || !card.yani_id) {
                 Lampa.Noty.show(t('no_videos'));
                 restorePlaybackInteraction();
                 return;
             }
-            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+            var operation = deps.beginOperation ? deps.beginOperation(t('loading'), {onCancel: function () { restorePlaybackInteraction(); }}) : null;
+            if (!operation && Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
             enrichEpisodeTitles(card);
 
-            loadVideosForPlayback(card.yani_id).then(function (payload) {
-                if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+            (operation ? loadVideos(card.yani_id) : loadVideosForPlayback(card.yani_id)).then(function (payload) {
+                if (operation && !operation.finish()) return;
+                if (!operation && Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 var videos = payload && payload.response ? payload.response : payload;
                 videos = (Array.isArray(videos) ? videos : []).filter(function (video) {
                     return video && videoSourceUrl(video);
@@ -8750,10 +8906,12 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 if (resume) {
                     var playback = card.yani_resume || getPlayback(card.yani_id);
                     var resumeVoice = playback && voices.filter(function (voice) {
+                        if (playback.voice && normalizeVoiceName(voice.group.title) !== normalizeVoiceName(playback.voice)) return false;
+                        if (playback.player && !savedPlayerMatches(voice.group, playback.player)) return false;
                         if (playback.video_id && voice.group.videos.some(function (video) {
                             return String(video.video_id || video.id || '') === String(playback.video_id);
                         })) return true;
-                        return playerMatchesPreference(voice.group, playback.player);
+                        return Boolean(playback.voice && playback.player);
                     })[0];
                     var resumePlaylist = resumeVoice && uniqueEpisodes(resumeVoice.group.videos);
                     var resumeVideo = resumePlaylist && resumePlaylist.filter(function (video) {
@@ -8761,19 +8919,40 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                         return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), playback.number);
                     })[0];
                     if (resumeVideo) {
+                        var complete = playback.completed || playback.finished || playback.finished_episodes && playback.finished_episodes[window.LampaYaniEpisode.key(playback.number)] || (Number(playback.duration) > 0 && Number(playback.time) >= Number(playback.duration) * 0.95);
+                        if (complete) {
+                            var currentNumber = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(resumeVideo));
+                            var nextVideos = resumePlaylist.filter(function (video) {
+                                var nextNumber = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(video));
+                                return isFinite(currentNumber) && isFinite(nextNumber) && nextNumber > currentNumber;
+                            }).sort(function (a, b) { return window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(a)) - window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(b)); });
+                            if (nextVideos.length) resumeVideo = nextVideos[0];
+                            else return chooseEpisode(card, resumeVoice.group, videos, {onVoices: showVoices});
+                        }
+                        if (!complete) {
                         resumeVideo.watched = resumeVideo.watched || {};
                         resumeVideo.watched.end_time = Math.max(Number(resumeVideo.watched.end_time || 0), Number(playback.time || 0));
                         if (!resumeVideo.duration && playback.duration) resumeVideo.duration = Number(playback.duration);
+                        }
                         rememberPlayer(resumeVoice.group);
                         return launchVideo(card, resumeVoice.group, resumePlaylist, resumeVideo);
                     }
                 }
 
-                if (voices.length === 1) {
+                if (openOptions.chooseEpisode) {
+                    var savedVoice = lastWatchedVoice(voices, card);
+                    if (savedVoice) {
+                        rememberPlayer(savedVoice.group);
+                        enrichEpisodeTitles(card, savedVoice.group);
+                        return chooseEpisode(card, savedVoice.group, videos, {onVoices: showVoices});
+                    }
+                }
+                if (voices.length === 1 && !resume && !openOptions.chooseVoice) {
                     rememberPlayer(voices[0].group);
                     enrichEpisodeTitles(card, voices[0].group);
-                    return chooseEpisode(card, voices[0].group, videos);
+                    return chooseEpisode(card, voices[0].group, videos, {onVoices: showVoices});
                 }
+                function showVoices() {
                 var selectedVoice = markLastWatchedVoice(voices, card);
                 showPlaybackSelect({
                     title: t('choose_voice'),
@@ -8783,10 +8962,25 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                     onSelect: function (item) {
                         rememberPlayer(item.group);
                         enrichEpisodeTitles(card, item.group);
-                        chooseEpisode(card, item.group, videos);
+                        if (openOptions.episode !== undefined) {
+                            var requested = typeof openOptions.episode === 'object' ? window.LampaYaniEpisode.valueOf(openOptions.episode) : openOptions.episode;
+                            var selectedVideos = uniqueEpisodes(item.group.videos);
+                            var requestedVideo = selectedVideos.filter(function (video) { return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), requested); })[0];
+                            if (requestedVideo) return launchVideo(card, item.group, selectedVideos, applySavedPlaybackPosition(card, requestedVideo));
+                        }
+                        chooseEpisode(card, item.group, videos, {onBack: function () { showVoices(); return false; }, onVoices: showVoices});
                     }
                 });
+                }
+                showVoices();
             }).catch(function (error) {
+                if (operation) {
+                    if (!operation.current()) return;
+                    return operation.fail({message: t('videos_load_error'), retry: function () { openVideos(card, openOptions); }, alternate: function () {
+                        if (deps.chooseSource) deps.chooseSource(card);
+                        else restorePlaybackInteraction();
+                    }});
+                }
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 console.error('[YummyAnime Videos]', error);
                 Lampa.Noty.show(t('videos_load_error'));
@@ -8825,7 +9019,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             return items;
         }
 
-        function resetEpisode(card, allVideos, item) {
+        function resetEpisode(card, allVideos, item, restore) {
             var affected = (allVideos || []).filter(function (video) {
                 return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), item.episode);
             });
@@ -8834,16 +9028,18 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             Promise.resolve(clearEpisodeProgress(card, affected)).then(function () {
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 Lampa.Noty.show(t('episode_progress_cleared'));
-                restorePlaybackInteraction();
+                if (restore) restore(); else restorePlaybackInteraction();
             }).catch(function (error) {
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 console.warn('[YummyAnime] Episode progress reset failed', error);
                 Lampa.Noty.show(t('episode_progress_clear_error'));
-                restorePlaybackInteraction();
+                if (restore) restore(); else restorePlaybackInteraction();
             });
         }
 
-        function chooseEpisode(card, group, allVideos) {
+        function chooseEpisode(card, group, allVideos, options) {
+            options = options || {};
+            if (options.chooseSource) return openVideos(card, {chooseVoice: true, episode: options.episode});
             var videos = group.videos.slice().sort(function (a, b) {
                 var numberA = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(a));
                 var numberB = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(b));
@@ -8863,6 +9059,33 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             });
             allVideos = Array.isArray(allVideos) ? allVideos : group.videos;
             var resetItems = resettableEpisodes(card, allVideos);
+            if (window.LampaYaniEpisodeBrowser) {
+                if (!episodeBrowser) episodeBrowser = window.LampaYaniEpisodeBrowser.create({
+                    showSelect: showPlaybackSelect,
+                    input: deps.input || function (params, callback) {
+                        if (Lampa.Input && Lampa.Input.edit) Lampa.Input.edit(params, callback);
+                        else callback('');
+                    },
+                    value: window.LampaYaniEpisode.valueOf,
+                    title: episodeOptionTitle,
+                    getPlayback: getPlayback
+                });
+                return episodeBrowser.open(card, group, videos, {
+                    onSelect: function (video, restore) {
+                        beginPlaybackNavigation();
+                        playbackReturnState.reopen = restore;
+                        launchVideo(card, group, videos, applySavedPlaybackPosition(card, video));
+                    },
+                    onBack: options.onBack || function () { playbackReturnState.reopen = null; restorePlaybackInteraction(); return false; },
+                    onVoices: options.onVoices,
+                    resettable: resetItems.length > 0,
+                    onReset: function (restore) {
+                        showPlaybackSelect({title: t('reset_episode_progress'), items: resetItems,
+                            onBack: function () { restore(); return false; },
+                            onSelect: function (item) { resetEpisode(card, allVideos, item, restore); }});
+                    }
+                });
+            }
             if (episodes.length === 1 && !resetItems.length) return launchVideo(card, group, videos, applySavedPlaybackPosition(card, videos[0]));
             if (resetItems.length) {
                 episodes.push({
@@ -8983,7 +9206,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     'use strict';
 
     // Native Lampa card resolve (Yummy -> TMDB), reverse match (TMDB -> Yummy),
-    // and full-detail rating/button decoration. Detail Activity push stays in ui.js.
+    // and full-detail rating decoration. Detail Activity push stays in ui.js.
 
     function create(deps) {
         deps = deps || {};
@@ -9495,7 +9718,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 if (event.type !== 'complite') return;
                 var movie = event.data && event.data.movie ? event.data.movie : event.object && event.object.card_data;
                 if (!movie || !event.object || !event.object.activity) return;
-                if (!lampaCardIntegrationEnabled('rating') && !lampaCardIntegrationEnabled('button')) return;
+                if (!lampaCardIntegrationEnabled('rating')) return;
                 // A native Lampa card may be a film or a live-action series with
                 // an accidentally similar title. Do not decorate those cards
                 // with a YummyAnime action.
@@ -9517,7 +9740,6 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                         var block = $('<div class="full-start__rate ' + className + '"><div>' + formatRating(rating.value) + '</div><div class="yani-full-rating-label" title="' + rating.title + '" aria-label="' + rating.title + '">YA</div></div>');
                         line.append(block);
                     });
-                    addYummyFullButton(render, movie, anime);
                 }).catch(function () {});
             });
         }
@@ -9534,24 +9756,6 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             var value = Lampa.Storage.get('yani_lampa_card_' + feature, true);
             return value !== false && value !== 'false';
         }
-
-        function yummyRatingLogo() {
-            return '<svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M18.45 0H1.55A1.55 1.55 0 000 1.55v16.9A1.54 1.54 0 001.55 20h16.9A1.55 1.55 0 0020 18.45V1.55A1.54 1.54 0 0018.45 0Zm-2.83 5.93-2.1 2.66-2.3-5.43a6.95 6.95 0 014.4 2.77Zm-2.9 6.57h-4l2.03-4.8 1.98 4.8Zm-2.37-9.34L7.8 9.06 4.87 5.33c.64-.7 1.4-1.26 2.27-1.65a8.18 8.18 0 013.2-.52ZM3.57 7.39l3.2 4.06-1.56 3.58A6.96 6.96 0 013.57 7.39Zm6.57 9.56c-1.05.01-2.1-.2-3.05-.65l.76-1.8h5.7l.49 1.15a6.93 6.93 0 01-3.9 1.3Zm6.8-7.07a7.8 7.8 0 01-1.17 4L14.55 11l2.17-2.77c.14.54.21 1.1.23 1.65Z"/></svg>';
-        }
-
-        function addYummyFullButton(render, movie, anime) {
-            if (!lampaCardIntegrationEnabled('button')) return;
-            var container = $('.full-start-new__buttons', render);
-            if (!container.length) container = $('.full-start__buttons', render);
-            if (!container.length) return;
-
-            if (!$('.view--yummyanime', render).length) {
-                var button = $('<div class="full-start__button selector view--yummyanime" title="YummyAnime" aria-label="YummyAnime"><span class="view--yummyanime__icon" aria-hidden="true">' + yummyRatingLogo() + '</span></div>');
-                button.on('hover:enter click.yaniFullDetail', function () { openYummyDetail(anime, false); });
-                container.prepend(button);
-            }
-        }
-
 
         return {
             openStandardLampaCard: openStandardLampaCard,
@@ -15535,6 +15739,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             var movie = event.data && event.data.movie;
             if (!movie || !deps.isAnime(movie)) return;
             var render = event.object.activity.render();
+            if (deps.decorateCard) deps.decorateCard(event.object, movie, render, event.link);
             var container = render.find('.buttons--container').first();
             if (!container.length || render.find('.view--yummy-native-source').length) return;
             var owner = event.object;
@@ -15550,6 +15755,219 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     }
 
     window.LampaYaniNativeShell = {install: install, isAnimeCategory: isAnimeCategory};
+}(window));
+
+(function (window) {
+    'use strict';
+
+    function create(deps) {
+        deps = deps || {};
+        var lampa = deps.lampa || window.Lampa || {};
+        var active = null;
+        var generation = 0;
+
+        function owner() {
+            return lampa.Activity && lampa.Activity.active ? lampa.Activity.active() : null;
+        }
+
+        function begin(message, options) {
+            options = options || {};
+            // Retire before starting the next loader, without reopening its parent UI.
+            if (active) active.retire();
+            var token = ++generation;
+            var activity = owner();
+            var phase = 'loading';
+            var loading = true;
+            var operation;
+
+            function owns() {
+                return active === operation && generation === token;
+            }
+
+            function valid() {
+                return owns() && activity === owner();
+            }
+
+            function stop() {
+                if (owns() && loading) {
+                    loading = false;
+                    var controller = lampa.Controller;
+                    var enabled = controller && controller.enabled ? controller.enabled() : null;
+                    var currentController = enabled && enabled.name;
+                    if (lampa.Loading && lampa.Loading.stop) lampa.Loading.stop();
+                    // Native Loading.stop restores its captured controller even after navigation.
+                    // Keep the new activity's controller, without reviving an obsolete loading layer.
+                    if (owns() && activity !== owner() && currentController && currentController !== 'loading' &&
+                        controller && controller.toggle) {
+                        enabled = controller.enabled ? controller.enabled() : null;
+                        if (!enabled || enabled.name !== currentController) controller.toggle(currentController);
+                    }
+                }
+            }
+
+            function retire() {
+                stop();
+                phase = 'done';
+                if (active === operation) active = null;
+            }
+
+            function closeError() {
+                if (phase !== 'error') return;
+                phase = 'closing';
+                if (lampa.Select && lampa.Select.close) lampa.Select.close();
+            }
+
+            function cancel() {
+                if (!owns() || (phase !== 'loading' && phase !== 'error')) return;
+                var notify = valid();
+                if (notify) closeError();
+                retire();
+                var callback = options.onCancel || deps.onCancel;
+                if (notify && activity === owner() && generation === token && typeof callback === 'function') callback();
+            }
+
+            function current() {
+                return phase === 'loading' && valid();
+            }
+
+            function finish() {
+                var ready = current();
+                if (owns() && phase === 'loading') retire();
+                return ready;
+            }
+
+            function fail(details) {
+                details = details || {};
+                if (!current()) {
+                    if (owns() && phase === 'loading') retire();
+                    return false;
+                }
+                stop();
+                phase = 'error';
+                var items = [];
+                if (typeof details.retry === 'function') items.push({title: 'Повторить', action: 'retry'});
+                if (typeof details.alternate === 'function') items.push({title: 'Выбрать другой источник', action: 'alternate'});
+                if (lampa.Select && lampa.Select.show) {
+                    lampa.Select.show({
+                        // The caller supplies localized safe text; never inspect an Error or URL.
+                        title: typeof details.message === 'string' && details.message ? details.message : 'Не удалось начать просмотр',
+                        items: items,
+                        onSelect: function (item) {
+                            if (phase !== 'error' || !valid() || items.indexOf(item) === -1) return;
+                            var callback = item.action === 'retry' ? details.retry : details.alternate;
+                            closeError();
+                            retire();
+                            // Select.close may synchronously change activity or start another operation.
+                            if (activity === owner() && generation === token && typeof callback === 'function') callback();
+                        },
+                        onBack: cancel
+                    });
+                } else {
+                    cancel();
+                }
+                return true;
+            }
+
+            operation = {current: current, finish: finish, cancel: cancel, fail: fail, retire: retire};
+            active = operation;
+            if (lampa.Loading && lampa.Loading.start) lampa.Loading.start(cancel, message);
+            return operation;
+        }
+
+        return {begin: begin};
+    }
+
+    window.LampaYaniPlaybackOperation = {create: create};
+})(window);
+
+(function (window) {
+    'use strict';
+    function positive(value) { var n = Number(value); return isFinite(n) && n > 0 ? n : 0; }
+    function actionState(progress, ceiling, source) {
+        var state = {label: 'Смотреть', episode: 0, time: 0};
+        if (source !== 'yummyanime' || !progress) return state;
+        var number = positive(progress.number || progress.episode);
+        var time = positive(progress.time || progress.position), duration = positive(progress.duration);
+        if (!number || Math.floor(number) !== number) return state;
+        var finished = progress.finished || progress.completed || progress.finished_episodes && progress.finished_episodes[number] || duration && time / duration >= 0.95;
+        if (finished) {
+            if (number + 1 <= positive(ceiling)) {
+                state.episode = number + 1;
+                state.label = 'Продолжить: серия ' + state.episode + ' · 0:00';
+            }
+        } else if (time > 0 && duration > time) {
+            state.episode = number; state.time = Math.floor(time);
+            state.label = 'Продолжить: серия ' + number + ' · ' + Math.floor(state.time / 60) + ':' + ('0' + state.time % 60).slice(-2);
+        }
+        return state;
+    }
+    function create(deps) {
+        var L = deps.lampa, $ = deps.$, states = [];
+        var defer = deps.defer || function (fn) { setTimeout(fn, 0); };
+        function source() {
+            var value = L.Storage && L.Storage.get('yani_native_default_source', 'yummyanime');
+            return value === 'bwa' || value === 'ask' ? value : 'yummyanime';
+        }
+        function ceiling(card, progress) {
+            var episodes = card && (card.yani_episodes || card.episodes) || {};
+            return positive(episodes.aired || episodes.released) || positive(episodes.count || episodes.total) || positive(card && (card.episodes_aired || card.episodes_count)) || positive(progress && progress.episodes_aired);
+        }
+        function update(state) {
+            if (!state.play) return;
+            state.play.off('hover:enter').on('hover:enter', function () { route(state, false); });
+            var card = state.movie.yani_card;
+            var progress = card && deps.getPlayback ? deps.getPlayback(card) : null;
+            state.play.find('span').text(actionState(progress, ceiling(card, progress), source()).label);
+        }
+        // Call after progress changes or returning focus to a full card.
+        function refresh() { states.forEach(update); }
+        function active(state) { return !L.Activity || !L.Activity.active || L.Activity.active() === state.owner; }
+        function route(state, choose) {
+            if (!active(state)) return;
+            var selected = source(), found = false;
+            if (selected === 'yummyanime') return deps.openPlayback(state.movie, choose ? {chooseEpisode: true} : {resume: true});
+            if (selected === 'bwa') state.render.find('.buttons--container > .full-start__button').each(function () {
+                var button = $(this);
+                if (!found && button.text().trim() === 'BWA') { found = true; button.trigger('hover:enter'); }
+            });
+            if (!found) state.other.trigger('hover:enter');
+        }
+        function decorate(owner, movie, render) {
+            if (!owner || !movie || !render) return;
+            var existing = states.filter(function (s) { return s.owner === owner && s.render === render; })[0];
+            if (existing) { update(existing); return; }
+            var state = {owner: owner, movie: movie, render: render};
+            states.push(state); if (states.length > 8) states.shift();
+            defer(function () {
+                var play = render.find('.button--play').first();
+                if (!play.length || render.find('.yani-other-sources').length) return;
+                state.play = play;
+                // Native groupButtons binds Watch after full/complite. Clone its
+                // completed handler here so the original source menu stays reachable.
+                var other = play.clone(true).removeClass('button--play button--priority').addClass('yani-other-sources');
+                state.other = other; other.find('span').text('Другие источники');
+                // Keep native focus handlers, but gate the captured menu callback.
+                var menu = other.clone(true);
+                other.off('hover:enter').on('hover:enter', function () { if (active(state)) menu.trigger('hover:enter'); });
+                var choose = play.clone(true).removeClass('button--play button--priority').addClass('yani-choose-episode');
+                choose.find('span').text('Выбрать серию');
+                choose.off('hover:enter').on('hover:enter', function () { route(state, true); });
+                play.after(other); play.after(choose);
+                play.off('hover:enter').on('hover:enter', function () { route(state, false); });
+                render.find('.full-start-new__buttons').css('flex-wrap', 'wrap');
+                update(state);
+            });
+            if (deps.resolveCard) Promise.resolve().then(function () { return movie.yani_card || deps.resolveCard(movie); }).then(function (card) {
+                if (card) { movie.yani_card = card; update(state); }
+            }).catch(function () { /* Native sources remain usable when mapping fails. */ });
+        }
+        if (L.SettingsApi && L.SettingsApi.addParam && !L.__yaniNativeCardActionsSettings) {
+            L.__yaniNativeCardActionsSettings = true;
+            L.SettingsApi.addParam({component: 'player', param: {name: 'yani_native_default_source', type: 'select', values: {yummyanime: 'YummyAnime', bwa: 'BWA', ask: 'Спрашивать'}, default: 'yummyanime'}, field: {name: 'Аниме: источник по умолчанию'}, onChange: refresh});
+        }
+        return {decorate: decorate, refresh: refresh};
+    }
+    window.LampaYaniNativeCardActions = {create: create, actionState: actionState};
 }(window));
 
 (function (window) {
@@ -15643,9 +16061,27 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     var isNativeAnimeCard = standardCard.isNativeAnimeCard;
     var installFullRating = standardCard.installFullRating;
 
+    var playbackOperations = LampaYaniPlaybackOperation.create({
+        lampa: Lampa,
+        onCancel: function () { restorePlaybackInteraction(); }
+    });
+    function beginPlaybackOperation(message, options) { return playbackOperations.begin(message, options); }
+    var nativeCardActions = LampaYaniNativeCardActions.create({
+        lampa: Lampa, $: $,
+        openPlayback: function (movie, options) { return openYummyForMovie(movie, options); },
+        resolveCard: function (movie) {
+            return findYummyMatches(movie).then(function (matches) { return matches.length === 1 ? matches[0] : null; });
+        },
+        getPlayback: function (card) { return getPlayback(card.yani_id); }
+    });
+    $(document).on('yani:watch-progress', function () { nativeCardActions.refresh(); });
+    window.addEventListener('focus', function () { nativeCardActions.refresh(); }, false);
 
     var playbackMenu = LampaYaniPlaybackMenu.create({
         t: t,
+        beginOperation: beginPlaybackOperation,
+        clearEpisodeProgress: function (card, videos) { return clearEpisodeProgress(card, videos); },
+        chooseSource: function () { openNativeSourceChoices(); },
         showYummySelect: function (params, snapshot) { return showYummySelect(params, snapshot); },
         currentControllerName: function () { return currentControllerName(); },
         listActionTitle: function (card, key) { return listActionTitle(card, key); },
@@ -15894,6 +16330,21 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                         $: $,
                         isAnime: function (movie) { return Boolean(movie.yani_card) || standardCard.isNativeAnimeCard(movie); },
                         openPlayback: openYummyForMovie,
+                        decorateCard: function (owner, movie, render, link) {
+                            var language = String(movie.original_language || movie.language || '').toLowerCase();
+                            if (!movie.yani_card && language !== 'ja') return;
+                            nativeCardActions.decorate(owner, movie, render);
+                            var start = link && link.items && link.items[0];
+                            if (start && start.emit && !start.__yaniActions) {
+                                start.__yaniActions = true;
+                                var emit = start.emit;
+                                start.emit = function (name) {
+                                    var result = emit.apply(this, arguments);
+                                    if (name === 'groupButtons') nativeCardActions.refresh();
+                                    return result;
+                                };
+                            }
+                        },
                         openSearch: function (onBack) { getSearchController().openNative(onBack); }
                     });
                     registerAndroidDirectVideoTube();
@@ -18696,31 +19147,40 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         getSearchController().register();
     }
 
-    function openYummyForMovie(movie) {
+    function openNativeSourceChoices() {
+        var owner = Lampa.Activity && Lampa.Activity.active && Lampa.Activity.active();
+        var render = owner && owner.activity && owner.activity.render && owner.activity.render();
+        cancelExternalRestore();
+        clearPlaybackReturn();
+        if (Lampa.Controller && Lampa.Controller.toggle) Lampa.Controller.toggle('content');
+        if (render && Lampa.Activity.active() === owner) render.find('.yani-other-sources').trigger('hover:enter');
+    }
+
+    function openYummyForMovie(movie, options) {
         beginPlaybackNavigation();
-        if (movie && movie.yani_card) return openVideos(movie.yani_card);
-        if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+        if (movie && movie.yani_card) return openVideos(movie.yani_card, options);
+        var operation = beginPlaybackOperation('Ищу аниме в YummyAnime…');
+        function failed(message) {
+            operation.fail({message: message, retry: function () { openYummyForMovie(movie, options); }, alternate: openNativeSourceChoices});
+        }
         findYummyMatches(movie).then(function (matches) {
-            if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+            if (!operation.current()) return;
             if (!matches.length) {
-                Lampa.Noty.show(t('no_yummy_match'));
-                restorePlaybackInteraction();
+                failed(t('no_yummy_match'));
                 return;
             }
-            if (matches.length === 1) return openVideos(matches[0]);
+            if (!operation.finish()) return;
+            if (matches.length === 1) { movie.yani_card = matches[0]; return openVideos(matches[0], options); }
 
             showPlaybackSelect({
                 title: t('choose_anime'),
                 items: matches.map(function (card) {
                     return {title: card.title + (card.release_date ? ' · ' + card.release_date : ''), card: card};
                 }),
-                onSelect: function (item) { openVideos(item.card); }
+                onSelect: function (item) { movie.yani_card = item.card; openVideos(item.card, options); }
             });
         }).catch(function (error) {
-            if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
-            console.error('[YummyAnime Search Source]', error);
-            Lampa.Noty.show(t('catalog_load_error'));
-            restorePlaybackInteraction();
+            failed(t('catalog_load_error'));
         });
     }
 
@@ -18840,12 +19300,16 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         var launchGeneration = ++playbackLaunchGeneration;
         if (card && card.yani_id && selected) videoData.retain(card.yani_id, selected);
         options = options || {};
-        if (options.playbackTarget === 'external') {
+        var retryOptions = options.yaniRetryOptions || options;
+        {
             var callerGuard = options.isCurrent;
             var navigationSession = playbackReturnState.session;
-            options = Object.assign({}, options, {isCurrent: function () {
+            var launchOwner = typeof Lampa !== 'undefined' && Lampa.Activity && Lampa.Activity.active ? Lampa.Activity.active() : null;
+            options = Object.assign({}, options, {yaniRetryOptions: retryOptions, isCurrent: function () {
                 return playbackLaunchGeneration === launchGeneration &&
-                    playbackReturnState.session === navigationSession && (!callerGuard || callerGuard());
+                    playbackReturnState.session === navigationSession &&
+                    (typeof Lampa === 'undefined' || !Lampa.Activity || !Lampa.Activity.active || Lampa.Activity.active() === launchOwner) &&
+                    (!callerGuard || callerGuard());
             }});
         }
         var url = videoSourceUrl(selected);
@@ -18873,10 +19337,15 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         }
         if (!isExternalPlayableUrl(url, selected) && window.LampaYaniStreamResolver && LampaYaniStreamResolver.canResolve(url)) {
             selected.yani_stream_origin = url;
-            if (options.playbackTarget !== 'external') setLoading(true);
+            var streamOperation = options.autoAdvance ? null : beginPlaybackOperation('Получение видеопотока');
+            if (!streamOperation && options.playbackTarget !== 'external') setLoading(true);
             LampaYaniStreamResolver.resolve(url, selected).then(function (result) {
-                if (options.isCurrent && !options.isCurrent()) return;
-                if (options.playbackTarget !== 'external') setLoading(false);
+                if (options.isCurrent && !options.isCurrent()) {
+                    if (streamOperation) streamOperation.finish();
+                    return;
+                }
+                if (streamOperation && !streamOperation.finish()) return;
+                if (!streamOperation && options.playbackTarget !== 'external') setLoading(false);
                 if (result && result.url) {
                     selected.yani_stream_url = result.url;
                     selected.yani_stream_quality = result.quality || '';
@@ -18887,7 +19356,19 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 }
                 launchResolvedVideo(card, group, videos, selected, videoSourceUrl(selected) || url, options);
             }).catch(function (error) {
-                if (options.isCurrent && !options.isCurrent()) return;
+                if (options.isCurrent && !options.isCurrent()) {
+                    if (streamOperation) streamOperation.finish();
+                    return;
+                }
+                if (streamOperation) {
+                    if (!streamOperation.current()) return;
+                    streamOperation.fail({
+                        message: 'Не удалось получить видео',
+                        retry: function () { launchVideo(card, group, videos, selected, retryOptions); },
+                        alternate: function () { chooseEpisode(card, group, videos, {chooseSource: true, episode: selected}); }
+                    });
+                    return;
+                }
                 if (options.playbackTarget !== 'external') setLoading(false);
                 console.warn('[YummyAnime] Stream resolve failed', error);
                 if (options.playbackTarget === 'external') {
@@ -19000,10 +19481,16 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     }
 
     function launchAllohaDirect(card, group, selected, url, chain, options) {
-        if (options.playbackTarget !== 'external') setLoading(true);
+        options = options || {};
+        var streamOperation = options.autoAdvance ? null : beginPlaybackOperation('Получение видеопотока Alloha');
+        if (!streamOperation && options.playbackTarget !== 'external') setLoading(true);
         resolveInOrder(chain).then(function (result) {
-            if (options.isCurrent && !options.isCurrent()) return;
-            if (options.playbackTarget !== 'external') setLoading(false);
+            if (options.isCurrent && !options.isCurrent()) {
+                if (streamOperation) streamOperation.finish();
+                return;
+            }
+            if (streamOperation && !streamOperation.finish()) return;
+            if (!streamOperation && options.playbackTarget !== 'external') setLoading(false);
             selected.yani_stream_url = result.url;
             selected.yani_stream_quality = result.quality || '';
             selected.yani_stream_qualities = result.qualities || null;
@@ -19012,7 +19499,19 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             selected.yani_stream_source = result.source || 'lampac-alloha';
             launchResolvedVideo(card, group, group.videos || [selected], selected, result.url, options);
         }).catch(function (error) {
-            if (options.isCurrent && !options.isCurrent()) return;
+            if (options.isCurrent && !options.isCurrent()) {
+                if (streamOperation) streamOperation.finish();
+                return;
+            }
+            if (streamOperation) {
+                if (!streamOperation.current()) return;
+                streamOperation.fail({
+                    message: 'Не удалось получить видео',
+                    retry: function () { launchAllohaDirect(card, group, selected, url, chain, options); },
+                    alternate: function () { chooseEpisode(card, group, group.videos || [selected], {chooseSource: true, episode: selected}); }
+                });
+                return;
+            }
             if (options.playbackTarget !== 'external') setLoading(false);
             console.warn('[YummyAnime] Alloha resolve failed; playback blocked', error);
             if (options.playbackTarget === 'external') {
@@ -21128,12 +21627,6 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             component: 'yani',
             param: {name: 'yani_lampa_card_rating', type: 'trigger', default: true},
             field: {name: t('lampa_card_rating'), description: t('lampa_card_rating_description')}
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'yani',
-            param: {name: 'yani_lampa_card_button', type: 'trigger', default: true},
-            field: {name: t('lampa_card_button'), description: t('lampa_card_button_description')}
         });
 
         Lampa.SettingsApi.addParam({

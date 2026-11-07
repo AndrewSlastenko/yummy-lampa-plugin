@@ -46,6 +46,7 @@
         var cancelExternalRestore = deps.cancelExternalRestore || function () {};
         var playbackSession = 0;
         var restoreTimer = null;
+        var episodeBrowser = null;
         var playbackReturnState = {
             active: false,
             session: 0,
@@ -74,6 +75,10 @@
             return voiceGroupPart(value);
         }
 
+        function savedPlayerMatches(group, player) {
+            return groupPart(group && (group.player || group.provider || group.source)) === groupPart(player);
+        }
+
         function lastWatchedVoice(voices, card) {
             var playback = card && (card.yani_resume || getPlayback(card.yani_id));
             if (!voices || !voices.length) return null;
@@ -94,6 +99,8 @@
             }
             var videoId = playback.video_id ? String(playback.video_id) : '';
             var byVideo = videoId && voices.filter(function (voice) {
+                if (playback.voice && normalizeVoiceName(voice.group.title) !== normalizeVoiceName(playback.voice)) return false;
+                if (playback.player && !savedPlayerMatches(voice.group, playback.player)) return false;
                 return voice.group && voice.group.videos && voice.group.videos.some(function (video) {
                     return String(video.video_id || video.id || '') === videoId;
                 });
@@ -106,9 +113,9 @@
             });
             if (playback.player) {
                 var withPlayer = named.filter(function (voice) {
-                    return playerMatchesPreference(voice.group, playback.player);
+                        return savedPlayerMatches(voice.group, playback.player);
                 });
-                if (withPlayer.length) return withPlayer[0];
+                return withPlayer[0] || null;
             }
             return named[0] || null;
         }
@@ -161,7 +168,8 @@
             return {
                 controller: playbackReturnState.controller || 'content',
                 element: playbackReturnState.element,
-                collection: playbackReturnState.collection
+                collection: playbackReturnState.collection,
+                reopen: playbackReturnState.reopen
             };
         }
 
@@ -170,11 +178,19 @@
             playbackReturnState.controller = 'content';
             playbackReturnState.element = null;
             playbackReturnState.collection = null;
+            playbackReturnState.reopen = null;
         }
 
         function restorePlaybackInteraction(snapshot, options) {
             snapshot = snapshot && snapshot.controller ? snapshot : playbackReturnSnapshot();
             options = options || {};
+            var reopen = snapshot.reopen || playbackReturnState.reopen;
+            if (reopen) {
+                playbackReturnState.reopen = null;
+                if (restoreTimer) { clearTimeout(restoreTimer); restoreTimer = null; }
+                reopen();
+                return;
+            }
             var timeout = Math.max(0, Number(options.timeout) || 2400);
             var interval = Math.max(50, Number(options.interval) || 120);
             var deadline = Date.now() + timeout;
@@ -243,7 +259,7 @@
             };
             params.onBack = function () {
                 if (settled) return;
-                if (originalBack) originalBack();
+                if (originalBack && originalBack() === false) return false;
                 restorePlaybackInteraction();
             };
             // Chained voice/episode/player windows own return focus themselves.
@@ -349,6 +365,7 @@
                     groups[key] = {
                         title: title,
                         player: data.player || data.source || data.service || '',
+                        provider: provider,
                         quality: videoQualityLabel(video),
                         source: source,
                         videos: [],
@@ -386,17 +403,22 @@
         }
 
         function openVideos(card, resume) {
+            var openOptions = resume && typeof resume === 'object' ? resume : {resume: Boolean(resume)};
+            resume = Boolean(openOptions.resume && !openOptions.chooseEpisode);
             beginPlaybackNavigation();
+            playbackReturnState.reopen = null;
             if (!card || !card.yani_id) {
                 Lampa.Noty.show(t('no_videos'));
                 restorePlaybackInteraction();
                 return;
             }
-            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+            var operation = deps.beginOperation ? deps.beginOperation(t('loading'), {onCancel: function () { restorePlaybackInteraction(); }}) : null;
+            if (!operation && Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
             enrichEpisodeTitles(card);
 
-            loadVideosForPlayback(card.yani_id).then(function (payload) {
-                if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+            (operation ? loadVideos(card.yani_id) : loadVideosForPlayback(card.yani_id)).then(function (payload) {
+                if (operation && !operation.finish()) return;
+                if (!operation && Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 var videos = payload && payload.response ? payload.response : payload;
                 videos = (Array.isArray(videos) ? videos : []).filter(function (video) {
                     return video && videoSourceUrl(video);
@@ -445,10 +467,12 @@
                 if (resume) {
                     var playback = card.yani_resume || getPlayback(card.yani_id);
                     var resumeVoice = playback && voices.filter(function (voice) {
+                        if (playback.voice && normalizeVoiceName(voice.group.title) !== normalizeVoiceName(playback.voice)) return false;
+                        if (playback.player && !savedPlayerMatches(voice.group, playback.player)) return false;
                         if (playback.video_id && voice.group.videos.some(function (video) {
                             return String(video.video_id || video.id || '') === String(playback.video_id);
                         })) return true;
-                        return playerMatchesPreference(voice.group, playback.player);
+                        return Boolean(playback.voice && playback.player);
                     })[0];
                     var resumePlaylist = resumeVoice && uniqueEpisodes(resumeVoice.group.videos);
                     var resumeVideo = resumePlaylist && resumePlaylist.filter(function (video) {
@@ -456,19 +480,40 @@
                         return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), playback.number);
                     })[0];
                     if (resumeVideo) {
+                        var complete = playback.completed || playback.finished || playback.finished_episodes && playback.finished_episodes[window.LampaYaniEpisode.key(playback.number)] || (Number(playback.duration) > 0 && Number(playback.time) >= Number(playback.duration) * 0.95);
+                        if (complete) {
+                            var currentNumber = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(resumeVideo));
+                            var nextVideos = resumePlaylist.filter(function (video) {
+                                var nextNumber = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(video));
+                                return isFinite(currentNumber) && isFinite(nextNumber) && nextNumber > currentNumber;
+                            }).sort(function (a, b) { return window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(a)) - window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(b)); });
+                            if (nextVideos.length) resumeVideo = nextVideos[0];
+                            else return chooseEpisode(card, resumeVoice.group, videos, {onVoices: showVoices});
+                        }
+                        if (!complete) {
                         resumeVideo.watched = resumeVideo.watched || {};
                         resumeVideo.watched.end_time = Math.max(Number(resumeVideo.watched.end_time || 0), Number(playback.time || 0));
                         if (!resumeVideo.duration && playback.duration) resumeVideo.duration = Number(playback.duration);
+                        }
                         rememberPlayer(resumeVoice.group);
                         return launchVideo(card, resumeVoice.group, resumePlaylist, resumeVideo);
                     }
                 }
 
-                if (voices.length === 1) {
+                if (openOptions.chooseEpisode) {
+                    var savedVoice = lastWatchedVoice(voices, card);
+                    if (savedVoice) {
+                        rememberPlayer(savedVoice.group);
+                        enrichEpisodeTitles(card, savedVoice.group);
+                        return chooseEpisode(card, savedVoice.group, videos, {onVoices: showVoices});
+                    }
+                }
+                if (voices.length === 1 && !resume && !openOptions.chooseVoice) {
                     rememberPlayer(voices[0].group);
                     enrichEpisodeTitles(card, voices[0].group);
-                    return chooseEpisode(card, voices[0].group, videos);
+                    return chooseEpisode(card, voices[0].group, videos, {onVoices: showVoices});
                 }
+                function showVoices() {
                 var selectedVoice = markLastWatchedVoice(voices, card);
                 showPlaybackSelect({
                     title: t('choose_voice'),
@@ -478,10 +523,25 @@
                     onSelect: function (item) {
                         rememberPlayer(item.group);
                         enrichEpisodeTitles(card, item.group);
-                        chooseEpisode(card, item.group, videos);
+                        if (openOptions.episode !== undefined) {
+                            var requested = typeof openOptions.episode === 'object' ? window.LampaYaniEpisode.valueOf(openOptions.episode) : openOptions.episode;
+                            var selectedVideos = uniqueEpisodes(item.group.videos);
+                            var requestedVideo = selectedVideos.filter(function (video) { return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), requested); })[0];
+                            if (requestedVideo) return launchVideo(card, item.group, selectedVideos, applySavedPlaybackPosition(card, requestedVideo));
+                        }
+                        chooseEpisode(card, item.group, videos, {onBack: function () { showVoices(); return false; }, onVoices: showVoices});
                     }
                 });
+                }
+                showVoices();
             }).catch(function (error) {
+                if (operation) {
+                    if (!operation.current()) return;
+                    return operation.fail({message: t('videos_load_error'), retry: function () { openVideos(card, openOptions); }, alternate: function () {
+                        if (deps.chooseSource) deps.chooseSource(card);
+                        else restorePlaybackInteraction();
+                    }});
+                }
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 console.error('[YummyAnime Videos]', error);
                 Lampa.Noty.show(t('videos_load_error'));
@@ -520,7 +580,7 @@
             return items;
         }
 
-        function resetEpisode(card, allVideos, item) {
+        function resetEpisode(card, allVideos, item, restore) {
             var affected = (allVideos || []).filter(function (video) {
                 return window.LampaYaniEpisode.same(window.LampaYaniEpisode.valueOf(video), item.episode);
             });
@@ -529,16 +589,18 @@
             Promise.resolve(clearEpisodeProgress(card, affected)).then(function () {
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 Lampa.Noty.show(t('episode_progress_cleared'));
-                restorePlaybackInteraction();
+                if (restore) restore(); else restorePlaybackInteraction();
             }).catch(function (error) {
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
                 console.warn('[YummyAnime] Episode progress reset failed', error);
                 Lampa.Noty.show(t('episode_progress_clear_error'));
-                restorePlaybackInteraction();
+                if (restore) restore(); else restorePlaybackInteraction();
             });
         }
 
-        function chooseEpisode(card, group, allVideos) {
+        function chooseEpisode(card, group, allVideos, options) {
+            options = options || {};
+            if (options.chooseSource) return openVideos(card, {chooseVoice: true, episode: options.episode});
             var videos = group.videos.slice().sort(function (a, b) {
                 var numberA = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(a));
                 var numberB = window.LampaYaniEpisode.number(window.LampaYaniEpisode.valueOf(b));
@@ -558,6 +620,33 @@
             });
             allVideos = Array.isArray(allVideos) ? allVideos : group.videos;
             var resetItems = resettableEpisodes(card, allVideos);
+            if (window.LampaYaniEpisodeBrowser) {
+                if (!episodeBrowser) episodeBrowser = window.LampaYaniEpisodeBrowser.create({
+                    showSelect: showPlaybackSelect,
+                    input: deps.input || function (params, callback) {
+                        if (Lampa.Input && Lampa.Input.edit) Lampa.Input.edit(params, callback);
+                        else callback('');
+                    },
+                    value: window.LampaYaniEpisode.valueOf,
+                    title: episodeOptionTitle,
+                    getPlayback: getPlayback
+                });
+                return episodeBrowser.open(card, group, videos, {
+                    onSelect: function (video, restore) {
+                        beginPlaybackNavigation();
+                        playbackReturnState.reopen = restore;
+                        launchVideo(card, group, videos, applySavedPlaybackPosition(card, video));
+                    },
+                    onBack: options.onBack || function () { playbackReturnState.reopen = null; restorePlaybackInteraction(); return false; },
+                    onVoices: options.onVoices,
+                    resettable: resetItems.length > 0,
+                    onReset: function (restore) {
+                        showPlaybackSelect({title: t('reset_episode_progress'), items: resetItems,
+                            onBack: function () { restore(); return false; },
+                            onSelect: function (item) { resetEpisode(card, allVideos, item, restore); }});
+                    }
+                });
+            }
             if (episodes.length === 1 && !resetItems.length) return launchVideo(card, group, videos, applySavedPlaybackPosition(card, videos[0]));
             if (resetItems.length) {
                 episodes.push({

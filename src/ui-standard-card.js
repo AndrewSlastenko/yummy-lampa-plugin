@@ -2,7 +2,7 @@
     'use strict';
 
     // Native Lampa card resolve (Yummy -> TMDB), reverse match (TMDB -> Yummy),
-    // and full-detail rating/button decoration. Detail Activity push stays in ui.js.
+    // and full-detail rating decoration. Detail Activity push stays in ui.js.
 
     function create(deps) {
         deps = deps || {};
@@ -514,7 +514,7 @@
                 if (event.type !== 'complite') return;
                 var movie = event.data && event.data.movie ? event.data.movie : event.object && event.object.card_data;
                 if (!movie || !event.object || !event.object.activity) return;
-                if (!lampaCardIntegrationEnabled('rating') && !lampaCardIntegrationEnabled('button')) return;
+                if (!lampaCardIntegrationEnabled('rating')) return;
                 // A native Lampa card may be a film or a live-action series with
                 // an accidentally similar title. Do not decorate those cards
                 // with a YummyAnime action.
@@ -536,7 +536,6 @@
                         var block = $('<div class="full-start__rate ' + className + '"><div>' + formatRating(rating.value) + '</div><div class="yani-full-rating-label" title="' + rating.title + '" aria-label="' + rating.title + '">YA</div></div>');
                         line.append(block);
                     });
-                    addYummyFullButton(render, movie, anime);
                 }).catch(function () {});
             });
         }
@@ -553,24 +552,6 @@
             var value = Lampa.Storage.get('yani_lampa_card_' + feature, true);
             return value !== false && value !== 'false';
         }
-
-        function yummyRatingLogo() {
-            return '<svg viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M18.45 0H1.55A1.55 1.55 0 000 1.55v16.9A1.54 1.54 0 001.55 20h16.9A1.55 1.55 0 0020 18.45V1.55A1.54 1.54 0 0018.45 0Zm-2.83 5.93-2.1 2.66-2.3-5.43a6.95 6.95 0 014.4 2.77Zm-2.9 6.57h-4l2.03-4.8 1.98 4.8Zm-2.37-9.34L7.8 9.06 4.87 5.33c.64-.7 1.4-1.26 2.27-1.65a8.18 8.18 0 013.2-.52ZM3.57 7.39l3.2 4.06-1.56 3.58A6.96 6.96 0 013.57 7.39Zm6.57 9.56c-1.05.01-2.1-.2-3.05-.65l.76-1.8h5.7l.49 1.15a6.93 6.93 0 01-3.9 1.3Zm6.8-7.07a7.8 7.8 0 01-1.17 4L14.55 11l2.17-2.77c.14.54.21 1.1.23 1.65Z"/></svg>';
-        }
-
-        function addYummyFullButton(render, movie, anime) {
-            if (!lampaCardIntegrationEnabled('button')) return;
-            var container = $('.full-start-new__buttons', render);
-            if (!container.length) container = $('.full-start__buttons', render);
-            if (!container.length) return;
-
-            if (!$('.view--yummyanime', render).length) {
-                var button = $('<div class="full-start__button selector view--yummyanime" title="YummyAnime" aria-label="YummyAnime"><span class="view--yummyanime__icon" aria-hidden="true">' + yummyRatingLogo() + '</span></div>');
-                button.on('hover:enter click.yaniFullDetail', function () { openYummyDetail(anime, false); });
-                container.prepend(button);
-            }
-        }
-
 
         return {
             openStandardLampaCard: openStandardLampaCard,

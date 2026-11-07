@@ -3,6 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+function playbackOperationStub() {
+    let active = true;
+    return {current: () => active, finish: () => { const wasActive = active; active = false; return wasActive; },
+        cancel: () => { active = false; }, fail: () => { active = false; }};
+}
+
 function setup(enabled = true) {
     const window = {};
     const file = 'src/ui-native-playback.js';
@@ -166,7 +172,7 @@ test('an older resolver cannot open its episode after a newer launch has started
     const source=fs.readFileSync('src/ui.js','utf8');
     const fragment=source.slice(source.indexOf('    function launchVideo('),source.indexOf('    function launchResolvedVideo('));
     const pending=[],opened=[];
-    const sandbox={nativePlayback:{cancel(){}},playbackLaunchGeneration:0,playbackReturnState:{session:1},ALLOHA_RESOLVED_SOURCES:[],videoData:{retain(){}},
+    const sandbox={beginPlaybackOperation:playbackOperationStub,nativePlayback:{cancel(){}},playbackLaunchGeneration:0,playbackReturnState:{session:1},ALLOHA_RESOLVED_SOURCES:[],videoData:{retain(){}},
         videoSourceUrl:v=>v.iframe_url,isAllohaUrl:()=>false,isSibnetPlaybackSource:()=>false,
         isExternalPlayableUrl:()=>false,setLoading(){},console,
         LampaYaniStreamResolver:{canResolve:()=>true,resolve:()=>new Promise(resolve=>pending.push(resolve))},
@@ -187,7 +193,7 @@ test('abandoned automatic resolution never owns the global loading overlay',asyn
     const fragment=source.slice(source.indexOf('    function launchVideo('),source.indexOf('    function launchResolvedVideo('));
     const loads=[],opened=[];let resolve;
     const navigation={session:1};
-    const sandbox={nativePlayback:{cancel(){}},playbackLaunchGeneration:0,playbackReturnState:navigation,
+    const sandbox={beginPlaybackOperation:playbackOperationStub,nativePlayback:{cancel(){}},playbackLaunchGeneration:0,playbackReturnState:navigation,
         ALLOHA_RESOLVED_SOURCES:[],videoData:{retain(){}},videoSourceUrl:v=>v.iframe_url,
         isAllohaUrl:()=>false,isSibnetPlaybackSource:()=>false,isExternalPlayableUrl:()=>false,
         setLoading:state=>loads.push(state),console,
@@ -204,7 +210,7 @@ test('stale Alloha errors cannot open an embedded fallback or touch navigation',
     const source=fs.readFileSync('src/ui.js','utf8');
     const fragment=source.slice(source.indexOf('    function launchAllohaDirect('),source.indexOf('    function launchAllohaPlayer('));
     const effects=[];let reject,current=true;
-    const sandbox={resolveInOrder:()=>new Promise((a,b)=>reject=b),setLoading:x=>effects.push('loading'),
+    const sandbox={beginPlaybackOperation:playbackOperationStub,resolveInOrder:()=>new Promise((a,b)=>reject=b),setLoading:x=>effects.push('loading'),
         blockAllohaPlayback:()=>effects.push('fallback'),chooseEpisode:()=>effects.push('picker'),
         Lampa:{Noty:{show:()=>effects.push('notice')}},t:x=>x,console};
     vm.runInNewContext(fragment,sandbox);

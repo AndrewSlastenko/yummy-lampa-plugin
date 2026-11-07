@@ -12,8 +12,8 @@ assert.match(menu, /function loadVideosForPlayback/);
 assert.match(ui, /function openEmbeddedEpisode/);
 assert.doesNotMatch(ui, /function restoreExternalFocus\(\)[\s\S]{0,300}if \(playbackReturnState\.active\) \{\s*cancelExternalRestore\(\)/,
     'an active YummyTV return session must be restored, not cancelled');
-assert.match(menu, /function chooseEpisode[\s\S]{0,1800}showPlaybackSelect\(\{/);
-assert.match(menu, /function openVideos[\s\S]{0,8000}showPlaybackSelect\(\{/);
+// Browser/voice selection and restoration are exercised by voice-select-last-watched-contract.test.js.
+assert.match(menu, /episodeBrowser\.open\(card, group, videos/);
 assert.match(menu, /function showDirectPlaybackOptions[\s\S]{0,2200}showPlaybackSelect\(\{/);
 assert.match(menu, /androidExternalPlayerAvailable/);
 assert.match(menu, /if \(items\.length === 1\)/);
@@ -34,7 +34,7 @@ assert.match(ui, /if \(!playbackReturnState\.active \|\| playbackReturnState\.se
 assert.match(ui, /var snapshot = \{/);
 assert.match(ui, /cancelExternalRestore\(\);\s*restorePlaybackInteraction\(snapshot/);
 assert.match(ui, /restorePlaybackInteraction\(snapshot, \{timeout: 2400, interval: 120\}\)/);
-assert.match(menu, /function restorePlaybackInteraction\(snapshot, options\)[\s\S]{0,500}var deadline = Date\.now\(\) \+ timeout/);
+assert.match(menu, /var deadline = Date\.now\(\) \+ timeout/);
 assert.match(menu, /if \(Date\.now\(\) < deadline\) restore\(interval, true\)/);
 assert.match(menu, /activeController === expectedController && activeFocus && focusInCollection/);
 assert.match(ui, /Lampa\.Player\.callback\(function \(\) \{[\s\S]{0,700}restorePlaybackInteraction\(null, \{timeout: 2400, interval: 120\}\)/);

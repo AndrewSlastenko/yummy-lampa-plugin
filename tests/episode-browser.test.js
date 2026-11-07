@@ -1,0 +1,83 @@
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const context = {window: {}};
+const source = 'src/ui-episode-browser.js';
+if (fs.existsSync(source)) vm.runInNewContext(fs.readFileSync(source, 'utf8'), context);
+assert.ok(context.window.LampaYaniEpisodeBrowser, 'episode browser export is available');
+let screen, input, progress = {number: 287}, chosen, restore, backs = 0;
+const browser = context.window.LampaYaniEpisodeBrowser.create({
+    showSelect: params => {screen = params;},
+    input: (params, callback) => {input = {params, callback};},
+    value: video => video.number,
+    title: (card, video) => (video.watched ? '✓ ' : '') + 'Серия ' + video.number,
+    getPlayback: () => progress
+});
+const videos = Array.from({length: 366}, (_, i) => ({number: i + 1}));
+const card = {yani_id: 1}, group = {title: 'Voice', player: 'Provider'};
+const options = {onSelect: (video, back) => {chosen = video; restore = back;}, onBack: () => {backs++;}, onVoices: () => {}, resettable: true, onReset: () => {}};
+const action = name => screen.items.find(row => row.action === name);
+const episode = number => screen.items.find(row => row.video && row.video.number === number);
+browser.open(card, group, videos, options);
+assert.ok(episode(287));
+assert.ok(screen.items[screen.selected].video.number === 287);
+assert.ok(episode(287).title.includes('▶'));
+assert.ok(!screen.items.some(row => /Сезон|арка/.test(row.title)), 'no fabricated season labels');
+screen.onSelect(action('ranges'));
+const allRanges = screen.items.filter(row => row.range !== undefined);
+const visited = [];
+allRanges.forEach(row => {
+    screen.onSelect(row);
+    screen.items.filter(item => item.video).forEach(item => visited.push(item.video.number));
+    screen.onBack();
+});
+assert.strictEqual(visited.length, 366);
+assert.strictEqual(new Set(visited).size, 366);
+assert.ok(visited.includes(366));
+screen.onBack();
+screen.onSelect(action('jump'));
+assert.strictEqual(input.params.layout, 'nums');
+assert.strictEqual(input.params.keyboard, 'lampa');
+assert.strictEqual(input.params.free, true);
+assert.strictEqual(input.params.nosave, true);
+input.callback('287');
+assert.ok(episode(287));
+screen.onSelect(episode(290));
+assert.strictEqual(chosen.number, 290);
+restore();
+assert.strictEqual(screen.items[screen.selected].video.number, 290);
+progress = {number: 340}; restore();
+assert.strictEqual(screen.items[screen.selected].video.number, 340);
+screen.onSelect(action('ranges'));
+const ranges = screen;
+assert.strictEqual(ranges.items.filter(row => row.range !== undefined).length, 15);
+screen.onSelect(ranges.items.filter(row => row.range !== undefined).pop());
+assert.ok(episode(366), 'tail remains reachable');
+assert.strictEqual(screen.onBack(), false);
+assert.strictEqual(screen.title, ranges.title);
+assert.strictEqual(screen.onBack(), false);
+assert.ok(episode(340), 'range chooser returns to the actual range that opened it');
+screen.onBack(); assert.strictEqual(backs, 1);
+const specials = [{number: 1, watched: true}, {number: 1.5}, {number: 'OVA'}, {id: 'missing'}];
+browser.open({yani_id: 2}, group, specials, options);
+assert.strictEqual(screen.items.filter(row => row.video).length, 4);
+assert.ok(episode(1).title.includes('✓'));
+screen.onSelect(episode('OVA')); assert.strictEqual(chosen.number, 'OVA');
+restore();
+assert.strictEqual(screen.items[screen.selected].video.number, 'OVA');
+browser.open({yani_id: 2}, group, specials, options);
+assert.strictEqual(screen.items[screen.selected].video.number, 'OVA');
+screen.onSelect(action('jump')); input.callback('1.5');
+assert.strictEqual(screen.items[screen.selected].video.number, 1.5);
+browser.open({yani_id: 3}, group, [{number: 1, season: 1}, {number: 2, data: {arc: 'Настоящая арка'}}], options);
+assert.ok(screen.items.some(row => row.title.indexOf('Сезон 1') >= 0));
+assert.ok(screen.items.some(row => row.title.indexOf('Настоящая арка') >= 0));
+screen.onSelect(screen.items.find(row => row.range === 1));
+screen.onSelect(episode(2)); restore();
+assert.strictEqual(screen.onBack(), false);
+assert.strictEqual(screen.title, 'Сезоны и арки');
+browser.open({yani_id: 5}, group, videos.map(video => ({number: video.number, data: {season: 1}})), options);
+assert.ok(episode(340), 'long metadata lists also resume inside the current range');
+browser.open({yani_id: 4}, group, [], options);
+assert.ok(screen.items.length); assert.strictEqual(screen.onBack(), false);
+console.log('episode-browser tests passed');

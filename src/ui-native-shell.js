@@ -54,6 +54,7 @@
             var movie = event.data && event.data.movie;
             if (!movie || !deps.isAnime(movie)) return;
             var render = event.object.activity.render();
+            if (deps.decorateCard) deps.decorateCard(event.object, movie, render, event.link);
             var container = render.find('.buttons--container').first();
             if (!container.length || render.find('.view--yummy-native-source').length) return;
             var owner = event.object;

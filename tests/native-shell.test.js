@@ -20,7 +20,8 @@ components.category=components.category_full;
 const L={Listener:{follow(name,fn){assert.equal(name,'full');fullListener=fn;}},Component:{get:n=>components[n],add(n,c){components[n]=c;}},Activity:{active:()=>active},
  Select:{show(o){menu=o;return 'shown';},close(){closed++;}},Head:{addElement(e,action){e.action=action;head.push(e);}},Controller:{toggle(n){assert.equal(n,'head');}}};
 function $(html){return {html,handlers:{},on(name,fn){this.handlers[name]=fn;return this;},remove(){head=head.filter(e=>e!==this);}};}
-const deps={lampa:L,$,isAnime:m=>!!m.anime,openPlayback(m){assert.equal(m.anime,true);played++;},openSearch(back){searches++;back();}};
+let decorated=[];
+const deps={decorateCard:(...args)=>decorated.push(args),lampa:L,$,isAnime:m=>!!m.anime,openPlayback(m){assert.equal(m.anime,true);played++;},openSearch(back){searches++;back();}};
 assert.equal(api.install(deps),true);
 assert.equal(api.install(deps),false);
 const original={title:'Источники',items:[{source:'veoveo',title:'VeoVeo'}],onSelect(){delegated++;}};
@@ -33,6 +34,8 @@ const event={type:'complite',data:{movie},object:active};
 assert.equal(typeof fullListener,'function','register a native full-card source');
 fullListener(event);assert.equal(sourceButtons.length,1);assert.match(sourceButtons[0].html,/>YummyAnime</);
 fullListener(event);assert.equal(sourceButtons.length,1,'one source per card');
+assert.equal(decorated.length,2,'decorate on repeated completion even if source already exists');
+assert.equal(decorated[0][0],event.object);assert.equal(decorated[0][1],movie);assert.equal(decorated[0][2],render);
 sourceButtons[0].handlers['hover:enter']();assert.equal(played,1);assert.equal(closed,1);
 active={component:'full',card:{anime:false}};sourceButtons[0].handlers['hover:enter']();assert.equal(played,1,'stale card must not launch');
 fullListener({type:'complite',data:{movie:{anime:false}},object:event.object});assert.equal(sourceButtons.length,1,'ordinary films get no YummyAnime source');

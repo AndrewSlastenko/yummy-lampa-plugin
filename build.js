@@ -10,6 +10,8 @@ const modules = ['src/config.js', 'src/i18n.js', 'src/genre-descriptions.js', 's
 modules.splice(modules.indexOf('src/stream-resolver.js'), 0, 'src/episode.js');
 modules.splice(modules.indexOf('src/ui.js'), 0, 'src/ui-native-playback.js');
 modules.splice(modules.indexOf('src/ui.js'), 0, 'src/ui-native-shell.js');
+modules.splice(modules.indexOf('src/ui-playback-menu.js'), 0, 'src/ui-episode-browser.js');
+modules.splice(modules.indexOf('src/ui.js'), 0, 'src/ui-playback-operation.js', 'src/ui-native-card-actions.js');
 modules.forEach((file) => execFileSync(process.execPath, ['--check', path.join(root, file)], {stdio: 'inherit'}));
 const body = modules.map((file) => normalizeNewlines(fs.readFileSync(path.join(root, file), 'utf8'))).join('\n');
 const css = normalizeNewlines(fs.readFileSync(path.join(root, 'style.css'), 'utf8'));
