@@ -15953,12 +15953,12 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 state.play = play;
                 // Native groupButtons binds Watch after full/complite. Clone its
                 // completed handler here so the original source menu stays reachable.
-                var other = play.clone(true).removeClass('button--play button--priority').addClass('yani-other-sources');
+                var other = play.clone(true).removeClass('button--play button--priority focus hover').addClass('yani-other-sources');
                 state.other = other; other.find('span').text('Другие источники');
                 // Keep native focus handlers, but gate the captured menu callback.
                 var menu = other.clone(true);
                 other.off('hover:enter').on('hover:enter', function () { if (active(state)) menu.trigger('hover:enter'); });
-                var choose = play.clone(true).removeClass('button--play button--priority').addClass('yani-choose-episode');
+                var choose = play.clone(true).removeClass('button--play button--priority focus hover').addClass('yani-choose-episode');
                 choose.find('span').text('Выбрать серию');
                 choose.off('hover:enter').on('hover:enter', function () { route(state, true); });
                 play.after(other); play.after(choose);

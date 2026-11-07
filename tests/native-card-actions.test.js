@@ -24,7 +24,7 @@ class Empty extends Element {constructor(){super();this.length=0;} }
 (async()=>{
 let active={}, source='yummyanime', calls=[], menus=0, settings=[], deferred=[];
 let hasBwa=true;
-const owner=active, movie={};const play=new Element('button--play button--priority','Смотреть');play.on('hover:enter',()=>menus++);
+const owner=active, movie={};const play=new Element('button--play button--priority focus','Смотреть');play.on('hover:enter',()=>menus++);
 const bwa=new Element('', 'BWA');bwa.on('hover:enter',()=>calls.push('bwa'));
 const render={find(s){if(s==='.button--play')return play;if(s==='.full-start-new__buttons')return new Element();if(s==='.buttons--container > .full-start__button')return {each(fn){if(hasBwa)fn.call(bwa,0,bwa);}};return new Empty();}};
 const lampa={Storage:{get:()=>source},Activity:{active:()=>active},SettingsApi:{addParam(p){settings.push(p);}}};
@@ -32,6 +32,7 @@ const instance=api.create({lampa,$:x=>x,openPlayback:(m,o)=>calls.push(o),resolv
 instance.decorate(owner,movie,render);instance.decorate(owner,movie,render);assert.equal(play.children.length,0);
 deferred.splice(0).forEach(fn=>fn());await new Promise(resolve=>setImmediate(resolve));
 assert.equal(play.children.length,2,'one clone and episode button');
+assert.ok(play.children.every(button=>!button.classes.has('focus')), 'new actions must not copy the primary button focus');
 assert.equal(play.value,'Продолжить: серия 4 · 1:15');assert.ok(movie.yani_card);
 play.off('hover:enter').on('hover:enter',()=>menus++); // Native groupButtons rebinds on every content toggle.
 instance.refresh();
