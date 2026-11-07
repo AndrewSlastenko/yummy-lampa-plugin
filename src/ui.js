@@ -4021,13 +4021,15 @@
                 (navigation === undefined || navigation === playbackReturnState.session);
         },
         enabled: autoNextEnabled,
+        onReturn: function (context, finished) {
+            if (!finished || !autoNextEnabled()) restoreNativePlaybackReturn(context);
+        },
         progress: function (context, time, duration, finished) {
             if (finished) {
                 context.selected.watched = context.selected.watched || {};
                 context.selected.watched.completed = true;
             }
             updatePlaybackProgress(context, time, duration, false);
-            if (!finished || !autoNextEnabled()) restoreNativePlaybackReturn(context);
         },
         beforeAdvance: function () {
             cancelExternalRestore();
@@ -5338,6 +5340,7 @@
 
     function restoreExternalFocus() {
         if (!externalRestoreState.pending) return;
+        if (typeof document !== 'undefined' && (document.hidden || typeof document.hasFocus === 'function' && !document.hasFocus())) return;
         // The active playback-return state is the state we must restore. Only
         // cancel when it was already completed or a newer playback session won.
         if (!playbackReturnState.active || playbackReturnState.session !== externalRestoreState.session) {
@@ -5354,6 +5357,7 @@
         var delay = Math.max(0, 250 - elapsed);
         setTimeout(function () {
             if (!externalRestoreState.pending) return;
+            if (typeof document !== 'undefined' && (document.hidden || typeof document.hasFocus === 'function' && !document.hasFocus())) return;
             if (!playbackReturnState.active || playbackReturnState.session !== externalRestoreState.session) {
                 cancelExternalRestore();
                 return;

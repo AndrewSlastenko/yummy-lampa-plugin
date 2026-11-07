@@ -45,6 +45,7 @@
                     // Lampa's native wrapper maps playback_completion to this
                     // sentinel; an ordinary Back can also round to 100 percent.
                     var finished = percent === 100 && position === 0 && length === 0;
+                    if (deps.onReturn) deps.onReturn(context, finished);
                     if (!finished && length === 0 && position === 0) return;
                     if (finished) position = length = duration;
                     deps.timeline.update({hash:hash,time:position,duration:length,percent:finished ? 100 : percent});

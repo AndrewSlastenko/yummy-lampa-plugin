@@ -15651,6 +15651,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                     // Lampa's native wrapper maps playback_completion to this
                     // sentinel; an ordinary Back can also round to 100 percent.
                     var finished = percent === 100 && position === 0 && length === 0;
+                    if (deps.onReturn) deps.onReturn(context, finished);
                     if (!finished && length === 0 && position === 0) return;
                     if (finished) position = length = duration;
                     deps.timeline.update({hash:hash,time:position,duration:length,percent:finished ? 100 : percent});
@@ -20001,13 +20002,15 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 (navigation === undefined || navigation === playbackReturnState.session);
         },
         enabled: autoNextEnabled,
+        onReturn: function (context, finished) {
+            if (!finished || !autoNextEnabled()) restoreNativePlaybackReturn(context);
+        },
         progress: function (context, time, duration, finished) {
             if (finished) {
                 context.selected.watched = context.selected.watched || {};
                 context.selected.watched.completed = true;
             }
             updatePlaybackProgress(context, time, duration, false);
-            if (!finished || !autoNextEnabled()) restoreNativePlaybackReturn(context);
         },
         beforeAdvance: function () {
             cancelExternalRestore();
@@ -21318,6 +21321,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 
     function restoreExternalFocus() {
         if (!externalRestoreState.pending) return;
+        if (typeof document !== 'undefined' && (document.hidden || typeof document.hasFocus === 'function' && !document.hasFocus())) return;
         // The active playback-return state is the state we must restore. Only
         // cancel when it was already completed or a newer playback session won.
         if (!playbackReturnState.active || playbackReturnState.session !== externalRestoreState.session) {
@@ -21334,6 +21338,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         var delay = Math.max(0, 250 - elapsed);
         setTimeout(function () {
             if (!externalRestoreState.pending) return;
+            if (typeof document !== 'undefined' && (document.hidden || typeof document.hasFocus === 'function' && !document.hasFocus())) return;
             if (!playbackReturnState.active || playbackReturnState.session !== externalRestoreState.session) {
                 cancelExternalRestore();
                 return;

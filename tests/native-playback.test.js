@@ -14,7 +14,7 @@ function setup(enabled = true) {
     const file = 'src/ui-native-playback.js';
     if (fs.existsSync(file)) vm.runInNewContext(fs.readFileSync(file, 'utf8'), {window, isFinite, Object, String, Number, Math});
     assert.equal(typeof window.LampaYaniNativePlayback?.create, 'function', 'native playback adapter must exist');
-    const queue = [], roads = {}, progress = [], advanced = [], events = [], followers=[];
+    const queue = [], roads = {}, progress = [], advanced = [], events = [], followers=[], returns=[];
     const selected = {number:'1',video_id:11,duration:1200,watched:{end_time:108},data:{dubbing:'Voice A'}};
     const context = {card:{yani_id:42},group:{player:'kodik'},videos:[selected,{number:'2',video_id:12}],selected};
     let current = context, active = true, navigation = 1;
@@ -26,12 +26,20 @@ function setup(enabled = true) {
         isCurrent:(c,token)=>c===current && active && (token === undefined || token === navigation), enabled:()=>enabled,
         progress:(c,time,duration,finished)=>progress.push({c,time,duration,finished}),
         beforeAdvance:()=>{events.push('before');return navigation;}, advance:c=>advanced.push(c),
+        onReturn:(c,finished)=>returns.push({c,finished}),
         defer:fn=>queue.push(fn)
     });
     const item = {url:'https://example/one.m3u8',title:'Example · Серия 1',time:108,headers:{Referer:'https://example/'},quality:{'1080p':'https://example/one.m3u8'}};
-    return {api,context,item,roads,queue,progress,advanced,events,followers,
+    return {api,context,item,roads,queue,progress,advanced,events,followers,returns,
         flush:()=>{while(queue.length)queue.shift()();},setCurrent:c=>current=c,leave:()=>active=false,navigate:()=>navigation++};
 }
+
+test('an immediate zero-progress Back still restores navigation exactly once',()=>{
+    const s=setup(),out=s.api.prepare(s.context,s.item);
+    out.timeline.handler(0,0,0);out.timeline.handler(0,0,0);
+    assert.equal(s.returns.length,1);assert.equal(s.returns[0].finished,false);
+    assert.equal(s.progress.length,0);assert.equal(s.advanced.length,0);
+});
 
 test('native progress resumes and preserves source metadata without mutating caller data',()=>{
     const s=setup(), before=JSON.stringify(s.item), out=s.api.prepare(s.context,s.item);
