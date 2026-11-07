@@ -37,10 +37,10 @@ Files: src/ui-native-shell.js (new), src/ui-search.js, src/ui-standard-card.js, 
 
 ## Task 2: Device delivery and acceptance
 
-- [ ] Inspect current extension URL via UI, preserve settings and obtain current content snapshot; publish only the personal fork deployment scope.
-- [ ] Verify deployed bytes, restart Lampa, confirm visible Anime search and native search results/card.
-- [ ] Open Online, select YummyAnime, select Alloha voice/episode, verify Just Player and Back behavior; record screenshots and state.
-- [ ] Fresh independent review, regression suite, preserve commits and evidence; check worktrees/artifacts and clean only task-owned temporary resources.
+- [x] Inspect current extension URL via UI, preserve settings and obtain current content snapshot; publish only the personal fork deployment scope.
+- [x] Verify deployed bytes, restart Lampa, confirm visible Anime search and native search results/card.
+- [x] Open Online, select YummyAnime, select Alloha voice/episode, verify Just Player and Back behavior; record screenshots and state.
+- [x] Fresh independent review, regression suite, preserve commits and evidence; check worktrees/artifacts and clean only task-owned temporary resources.
 
 ## Ledger
 
@@ -51,3 +51,5 @@ Files: src/ui-native-shell.js (new), src/ui-search.js, src/ui-standard-card.js, 
 
 - Live: published a0e1e8d byte-verified; native category Anime header visible. Search Goblin finds title27105 and opens standard full card. Watch/BWA source list includes YummyAnime; native voice/episode Select menus launch Just Player (PLAYING, position361412ms, buffer414117ms); Back returns BWA.
 - Compatibility: actual Watch also exposes separate Online_Mod. Allowlist extended to online_mod, failing regression then green; independent API review confirms its direct source menu source-item shape. Shared nested filter remains separate; direct source selector will be verified on device.
+
+- Completion: Online_Mod direct Balance selector contains YummyAnime; Alloha episode launches installed Just Player (PLAYING at385771ms, buffer438020ms). Back returns through native Online/fullcard to Anime; header search remains visible. Search Back separately verified. Device evidence in C:/projects/home/diagnostics/native-anime-2026-11-07/verification.json. No PC hosting, tunnels, temporary worktrees or APK changes.
