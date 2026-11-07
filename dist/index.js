@@ -19938,6 +19938,9 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     function openExternalPlayer(current, playlist, card) {
         if (!isAndroidPlatform()) return false;
         var playableUrl = current.url;
+        if (playbackContext) playbackContext.nativeReturn = {
+            snapshot: playbackReturnSnapshot(), session: playbackReturnState.session, owner: Lampa.Activity.active()
+        };
         current = nativePlayback.prepare(playbackContext, current);
         current.url = nativePlayback.mediaUrl(playbackContext, current.url, skipPreference());
         return openExternalVideo(current.url, current.title, {
@@ -19973,6 +19976,22 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
     var playbackContext = null;
     var playbackLaunchGeneration = 0;
     var nativePlaybackActivity = null;
+    function restoreNativePlaybackReturn(context) {
+        var saved = context && context.nativeReturn;
+        if (!saved) return;
+        cancelExternalRestore();
+        setTimeout(function () {
+            if (playbackContext !== context || playbackReturnState.session !== saved.session || Lampa.Activity.active() !== saved.owner) return;
+            // Android resumes the Activity after delivering its timeline result.
+            // Restore after that native lifecycle, using the launch snapshot even
+            // if a WebView focus event already consumed the initial callback.
+            playbackReturnState.active = true;
+            playbackReturnState.controller = saved.snapshot.controller;
+            playbackReturnState.element = saved.snapshot.element;
+            playbackReturnState.collection = saved.snapshot.collection;
+            restorePlaybackInteraction(saved.snapshot, {timeout: 2400, interval: 120});
+        }, 300);
+    }
     var nativePlayback = LampaYaniNativePlayback.create({
         timeline: Lampa.Timeline,
         number: function (video) { return window.LampaYaniEpisode.valueOf(video); },
@@ -19988,6 +20007,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 context.selected.watched.completed = true;
             }
             updatePlaybackProgress(context, time, duration, false);
+            if (!finished || !autoNextEnabled()) restoreNativePlaybackReturn(context);
         },
         beforeAdvance: function () {
             cancelExternalRestore();
