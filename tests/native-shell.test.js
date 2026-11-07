@@ -28,6 +28,7 @@ const stale=menu;active={component:'full',movie:{anime:true}};stale.onSelect(sta
 L.Select.show(original);assert.equal(menu,original,'outside Online is untouched');
 active={component:'bwa_online',movie:{anime:false}};L.Select.show(original);assert.equal(menu,original,'ordinary films unchanged');
 active={component:'bwa_online',movie:{anime:true}};const unrelated={items:[{title:'Озвучка'}]};L.Select.show(unrelated);assert.equal(menu,unrelated);
+active={component:'online_mod',movie:{anime:true}};L.Select.show(original);assert.equal(menu.items.filter(x=>x.source==='yummyanime').length,1,'the installed Online Mod source menu is supported too');
 const anime=components.category_full({component:'category_full',title:'Аниме'});anime.start();anime.start();assert.equal(head.length,1);
 head[0].action();assert.equal(searches,1);anime.pause();assert.equal(head.length,0);anime.start();assert.equal(head.length,1);anime.destroy();assert.equal(head.length,0);
 components.category_full({component:'category_full',title:'Фильмы'}).start();assert.equal(head.length,0);

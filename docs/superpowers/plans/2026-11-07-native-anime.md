@@ -48,3 +48,6 @@ Files: src/ui-native-shell.js (new), src/ui-search.js, src/ui-standard-card.js, 
 - Installed Online implementation is BWA (bwa_online), not historical Online_Mod; BWA source menu uses Lampa.Select.show. Extend this menu instead of assuming Lampa.Online.register exists.
 
 - Review: native Anime uses category/url anime/title Аниме - CUB; added regression plus hooks for both category and category_full. Lookup cancellation reproduced missing callback, fixed with Loading cancellation and timer cleanup; repeat review clean. 110/110 tests and bundle build pass. Installed personal extension URL confirmed through TV UI.
+
+- Live: published a0e1e8d byte-verified; native category Anime header visible. Search Goblin finds title27105 and opens standard full card. Watch/BWA source list includes YummyAnime; native voice/episode Select menus launch Just Player (PLAYING, position361412ms, buffer414117ms); Back returns BWA.
+- Compatibility: actual Watch also exposes separate Online_Mod. Allowlist extended to online_mod, failing regression then green; independent API review confirms its direct source menu source-item shape. Shared nested filter remains separate; direct source selector will be verified on device.

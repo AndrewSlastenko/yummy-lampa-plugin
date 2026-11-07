@@ -15534,7 +15534,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         L.Select.show = function (options) {
             var owner = L.Activity.active();
             var movie = owner && owner.movie;
-            if (owner && owner.component === 'bwa_online' && movie && deps.isAnime(movie) && options &&
+            if (owner && ['bwa_online', 'online_mod'].indexOf(owner.component) >= 0 && movie && deps.isAnime(movie) && options &&
                 Array.isArray(options.items) && options.items.some(function (item) { return typeof item.source === 'string'; }) &&
                 !options.items.some(function (item) { return item.source === 'yummyanime'; })) {
                 var originalSelect = options.onSelect;
