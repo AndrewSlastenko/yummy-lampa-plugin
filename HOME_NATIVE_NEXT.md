@@ -11,7 +11,7 @@ Replace the official extension URL, then restart Lampa. The unchanged `stable/` 
 ## Behavior
 
 - The native Anime tab has a **Поиск аниме** header action. It searches YummyAnime through Lampa's normal search screen and opens a standard Lampa title card. If TMDB has no matching card, playback is offered directly.
-- In a native card, choose **Смотреть → Онлайн → Балансер → YummyAnime** (or the source selector in BWA), then select a voice and episode. The ordinary Lampa select menus launch the installed player without opening the separate YummyAnime catalog or detail page.
+- In a native anime card, choose **Смотреть → YummyAnime**, next to BWA, then select a voice and episode. The ordinary Lampa select menus launch the installed player without opening the separate YummyAnime catalog or detail page. YummyAnime is independent of BWA's balancer list.
 
 - Native launches use distinct numeric result identities so late Android results cannot finish a reopened episode. Durable per-anime/episode/video/voice progress remains compatible with the prior Anime Progress bridge. The bridge passes existing timelines through unchanged.
 - The native playlist has one item. Exact normal completion (`100/0/0` from the Lampa wrapper) records completion and, if the existing auto-next setting is enabled, resolves the next item in the same voice/source group. Back, including near the end, does not auto-advance.

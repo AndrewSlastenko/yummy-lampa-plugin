@@ -8,27 +8,42 @@ assert.equal(api.isAnimeCategory({component:'category_full',title:'Аниме',s
 assert.equal(api.isAnimeCategory({component:'category_full',title:'Фильмы'}),false);
 assert.equal(api.isAnimeCategory({component:'full',title:'Аниме'}),false);
 assert.equal(api.isAnimeCategory({component:'category',url:'anime',title:'Аниме - CUB',source:'cub'}),true);
-let active={component:'bwa_online',movie:{anime:true}},menu,played=0,delegated=0,closed=0,searches=0,head=[];
+let active={component:'bwa_online',movie:{anime:true}},menu,played=0,delegated=0,closed=0,searches=0,head=[],fullListener;
+const sourceButtons=[];
+const render={find(selector){
+ if(selector==='.view--yummy-native-source')return {length:sourceButtons.filter(x=>x.html.includes('view--yummy-native-source')).length};
+ if(selector==='.buttons--container')return {length:1,first(){return this;},append(button){sourceButtons.push(button);}};
+ throw new Error('Unexpected selector '+selector);
+}};
 const components={category_full:function(){return {start(){},pause(){},stop(){},destroy(){}};}};
 components.category=components.category_full;
-const L={Component:{get:n=>components[n],add(n,c){components[n]=c;}},Activity:{active:()=>active},
+const L={Listener:{follow(name,fn){assert.equal(name,'full');fullListener=fn;}},Component:{get:n=>components[n],add(n,c){components[n]=c;}},Activity:{active:()=>active},
  Select:{show(o){menu=o;return 'shown';},close(){closed++;}},Head:{addElement(e,action){e.action=action;head.push(e);}},Controller:{toggle(n){assert.equal(n,'head');}}};
-function $(html){return {html,on(){return this;},remove(){head=head.filter(e=>e!==this);}};}
+function $(html){return {html,handlers:{},on(name,fn){this.handlers[name]=fn;return this;},remove(){head=head.filter(e=>e!==this);}};}
 const deps={lampa:L,$,isAnime:m=>!!m.anime,openPlayback(m){assert.equal(m.anime,true);played++;},openSearch(back){searches++;back();}};
 assert.equal(api.install(deps),true);
 assert.equal(api.install(deps),false);
 const original={title:'Источники',items:[{source:'veoveo',title:'VeoVeo'}],onSelect(){delegated++;}};
 assert.equal(L.Select.show(original),'shown');
 assert.equal(original.items.length,1,'never mutate BWA menu');
-assert.equal(menu.items.filter(x=>x.source==='yummyanime').length,1);
-menu.onSelect(menu.items.find(x=>x.source==='yummyanime'));
-assert.equal(played,1);assert.equal(closed,1);
-menu.onSelect(menu.items.find(x=>x.source==='veoveo'));assert.equal(delegated,1);
-const stale=menu;active={component:'full',movie:{anime:true}};stale.onSelect(stale.items.find(x=>x.source==='yummyanime'));assert.equal(played,1);
+assert.equal(menu,original,'BWA balancers must be left unchanged');
+menu.onSelect(menu.items[0]);assert.equal(delegated,1);
+const movie={anime:true};active={component:'full',card:movie,activity:{render:()=>render}};
+const event={type:'complite',data:{movie},object:active};
+assert.equal(typeof fullListener,'function','register a native full-card source');
+fullListener(event);assert.equal(sourceButtons.length,1);assert.match(sourceButtons[0].html,/>YummyAnime</);
+fullListener(event);assert.equal(sourceButtons.length,1,'one source per card');
+sourceButtons[0].handlers['hover:enter']();assert.equal(played,1);assert.equal(closed,1);
+active={component:'full',card:{anime:false}};sourceButtons[0].handlers['hover:enter']();assert.equal(played,1,'stale card must not launch');
+fullListener({type:'complite',data:{movie:{anime:false}},object:event.object});assert.equal(sourceButtons.length,1,'ordinary films get no YummyAnime source');
+sourceButtons.length=0;
+const lateOwner={component:'full',card:movie,activity:event.object.activity};
+fullListener({type:'complite',data:{movie},object:lateOwner});
+active=lateOwner;sourceButtons[0].handlers['hover:enter']();assert.equal(played,2,'late card completion must remain usable after returning to its owner');
 L.Select.show(original);assert.equal(menu,original,'outside Online is untouched');
 active={component:'bwa_online',movie:{anime:false}};L.Select.show(original);assert.equal(menu,original,'ordinary films unchanged');
 active={component:'bwa_online',movie:{anime:true}};const unrelated={items:[{title:'Озвучка'}]};L.Select.show(unrelated);assert.equal(menu,unrelated);
-active={component:'online_mod',movie:{anime:true}};L.Select.show(original);assert.equal(menu.items.filter(x=>x.source==='yummyanime').length,1,'the installed Online Mod source menu is supported too');
+active={component:'online_mod',movie:{anime:true}};L.Select.show(original);assert.equal(menu,original);
 const anime=components.category_full({component:'category_full',title:'Аниме'});anime.start();anime.start();assert.equal(head.length,1);
 head[0].action();assert.equal(searches,1);anime.pause();assert.equal(head.length,0);anime.start();assert.equal(head.length,1);anime.destroy();assert.equal(head.length,0);
 components.category_full({component:'category_full',title:'Фильмы'}).start();assert.equal(head.length,0);

@@ -49,27 +49,22 @@
             if (existing) L.Component.add(name, existing);
         });
 
-        var show = L.Select.show;
-        L.Select.show = function (options) {
-            var owner = L.Activity.active();
-            var movie = owner && owner.movie;
-            if (owner && ['bwa_online', 'online_mod'].indexOf(owner.component) >= 0 && movie && deps.isAnime(movie) && options &&
-                Array.isArray(options.items) && options.items.some(function (item) { return typeof item.source === 'string'; }) &&
-                !options.items.some(function (item) { return item.source === 'yummyanime'; })) {
-                var originalSelect = options.onSelect;
-                options = Object.assign({}, options, {
-                    items: [{title: 'YummyAnime', source: 'yummyanime', yaniNative: true}].concat(options.items),
-                    onSelect: function (item) {
-                        if (L.Activity.active() !== owner) return;
-                        if (item.yaniNative) {
-                            L.Select.close();
-                            deps.openPlayback(movie);
-                        } else if (originalSelect) return originalSelect.apply(this, arguments);
-                    }
-                });
-            }
-            return show.call(this, options);
-        };
+        if (L.Listener && L.Listener.follow) L.Listener.follow('full', function (event) {
+            if (event.type !== 'complite' || !event.object || !event.object.activity) return;
+            var movie = event.data && event.data.movie;
+            if (!movie || !deps.isAnime(movie)) return;
+            var render = event.object.activity.render();
+            var container = render.find('.buttons--container').first();
+            if (!container.length || render.find('.view--yummy-native-source').length) return;
+            var owner = event.object;
+            var button = $('<div class="full-start__button selector view--yummy-native-source"><svg><use xlink:href="#sprite-play"></use></svg><span>YummyAnime</span></div>');
+            button.on('hover:enter', function () {
+                if (L.Activity.active() !== owner) return;
+                L.Select.close();
+                deps.openPlayback(movie);
+            });
+            container.append(button);
+        });
         return true;
     }
 
