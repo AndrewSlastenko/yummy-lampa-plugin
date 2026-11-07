@@ -5606,10 +5606,8 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             }, delay);
         }
 
-        function register() {
-            if (!lampa || !lampa.Search || !lampa.Search.addSource || window.yummyanime_search_source_ready) return false;
-            window.yummyanime_search_source_ready = true;
-            lampa.Search.addSource({
+        function source(native) {
+            return {
                 title: options.sourceTitle || 'YummyAnime',
                 // Lampa Results.empty reads source.params.start_typing / nofound
                 // immediately on create. Missing params crashes global Search.
@@ -5619,10 +5617,22 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 search: search,
                 onSelect: function (params, close) {
                     if (typeof close === 'function') close();
-                    if (options.openDetail) options.openDetail(params && params.element);
+                    var openCard = native ? options.openNativeCard : options.openDetail;
+                    if (openCard) openCard(params && params.element);
                 }
-            });
+            };
+        }
+
+        function register() {
+            if (!lampa || !lampa.Search || !lampa.Search.addSource || window.yummyanime_search_source_ready) return false;
+            window.yummyanime_search_source_ready = true;
+            lampa.Search.addSource(source(false));
             return true;
+        }
+
+        function openNative(onBack) {
+            if (!lampa || !lampa.Search || !lampa.Search.open) return;
+            lampa.Search.open({sources: [source(true)], onBack: onBack});
         }
 
         function open() {
@@ -5642,7 +5652,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             pendingComplete = null;
         }
 
-        return {search: search, register: register, open: open, destroy: destroy};
+        return {search: search, register: register, open: open, openNative: openNative, destroy: destroy};
     }
 
     window.LampaYani = window.LampaYani || {};
@@ -8984,21 +8994,25 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
         var toCard = deps.toCard || function (item) { return item; };
         var formatRating = deps.formatRating || function (value) { return String(value || ''); };
 
-        function openStandardLampaCard(card) {
+        function openStandardLampaCard(card, fallback) {
             // Resolve a real TMDB card before opening Lampa's native detail page.
             // Never call `full` with an absent id: some Lampa builds then request
             // `/movie/undefined` forever.  A YummyAnime detail remains a useful
             // fallback when TMDB has no equivalent title.
             var settled = false;
-            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+            var lookupTimer;
+            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start(function () { finish(null, true); });
 
-            function finish(match) {
+            function finish(match, cancelled) {
                 if (settled) return;
                 settled = true;
+                clearTimeout(lookupTimer);
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+                if (cancelled) return;
 
                 if (!match || !match.card || !isValidNativeId(match.card.id) || !match.method) {
-                    openYummyDetail(card, true);
+                    if (typeof fallback === 'function') fallback(card);
+                    else openYummyDetail(card, true);
                     return;
                 }
 
@@ -9018,7 +9032,7 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
             // Do not leave the UI blocked if a third-party TMDB proxy silently
             // drops a request. The normal request callbacks still win when they
             // finish in time.
-            setTimeout(function () { finish(null); }, 20000);
+            lookupTimer = setTimeout(function () { finish(null); }, 20000);
             enrichCardForStandardSearch(card).then(findStandardLampaCard).then(finish).catch(function (error) {
                 console.warn('[YummyAnime] Native Lampa card lookup failed', error);
                 finish(null);
@@ -15468,6 +15482,84 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
 (function (window) {
     'use strict';
 
+    function isAnimeCategory(object) {
+        if (!object || ['category', 'category_full'].indexOf(object.component) < 0) return false;
+        return object.url === 'anime' || /^(аниме|anime)$/i.test(String(object.title || '').trim());
+    }
+
+    function install(deps) {
+        var L = deps.lampa, $ = deps.$;
+        if (!L || !L.Component || !L.Select || L.__yaniNativeShell) return false;
+        L.__yaniNativeShell = true;
+
+        function decorate(Original) {
+            if (!Original || Original.__yaniNativeCategory) return Original;
+            function Wrapped(object) {
+                var returned = Original.apply(this, arguments);
+                var comp = returned && typeof returned === 'object' ? returned : this;
+                if (!isAnimeCategory(object) || !L.Head || !L.Head.addElement) return comp;
+                var action;
+                function remove() { if (action) action.remove(); action = null; }
+                var start = comp.start;
+                comp.start = function () {
+                    if (!action) {
+                        action = $('<div class="head__action selector yani-native-search" style="width:auto;padding:0 .6em" title="Поиск аниме" aria-label="Поиск аниме"><span style="font-size:.85em;white-space:nowrap">Поиск аниме</span></div>');
+                        L.Head.addElement(action, function () {
+                            deps.openSearch(function () { L.Controller.toggle('head'); });
+                        });
+                    }
+                    if (start) return start.apply(this, arguments);
+                };
+                ['pause', 'stop', 'destroy'].forEach(function (name) {
+                    var original = comp[name];
+                    comp[name] = function () { remove(); if (original) return original.apply(this, arguments); };
+                });
+                return comp;
+            }
+            Wrapped.prototype = Original.prototype;
+            Wrapped.__yaniNativeCategory = true;
+            return Wrapped;
+        }
+
+        var add = L.Component.add;
+        L.Component.add = function (name, component) {
+            return add.call(this, name, name === 'category_full' || name === 'category' ? decorate(component) : component);
+        };
+        ['category', 'category_full'].forEach(function (name) {
+            var existing = L.Component.get(name);
+            if (existing) L.Component.add(name, existing);
+        });
+
+        var show = L.Select.show;
+        L.Select.show = function (options) {
+            var owner = L.Activity.active();
+            var movie = owner && owner.movie;
+            if (owner && owner.component === 'bwa_online' && movie && deps.isAnime(movie) && options &&
+                Array.isArray(options.items) && options.items.some(function (item) { return typeof item.source === 'string'; }) &&
+                !options.items.some(function (item) { return item.source === 'yummyanime'; })) {
+                var originalSelect = options.onSelect;
+                options = Object.assign({}, options, {
+                    items: [{title: 'YummyAnime', source: 'yummyanime', yaniNative: true}].concat(options.items),
+                    onSelect: function (item) {
+                        if (L.Activity.active() !== owner) return;
+                        if (item.yaniNative) {
+                            L.Select.close();
+                            deps.openPlayback(movie);
+                        } else if (originalSelect) return originalSelect.apply(this, arguments);
+                    }
+                });
+            }
+            return show.call(this, options);
+        };
+        return true;
+    }
+
+    window.LampaYaniNativeShell = {install: install, isAnimeCategory: isAnimeCategory};
+}(window));
+
+(function (window) {
+    'use strict';
+
     function t(name) {
         return window.LampaYaniI18n ? LampaYaniI18n.t(name) : name;
     }
@@ -15802,6 +15894,13 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                     ensureRemoteHistory();
                     registerOnlineSource();
                     registerSearchSource();
+                    LampaYaniNativeShell.install({
+                        lampa: Lampa,
+                        $: $,
+                        isAnime: function (movie) { return Boolean(movie.yani_card) || standardCard.isNativeAnimeCard(movie); },
+                        openPlayback: openYummyForMovie,
+                        openSearch: function (onBack) { getSearchController().openNative(onBack); }
+                    });
                     registerAndroidDirectVideoTube();
                 } catch (settingsError) {
                     console.error('[YummyAnime] Settings registration failed', settingsError);
@@ -18579,6 +18678,9 @@ messages.uk.cvh_region_blocked = 'Відео CVH недоступне у ваш�
                 searchTitle: t('search_title'),
                 showInput: showYummyInput,
                 openDetail: function (card) { openYummyDetail(card, false); },
+                openNativeCard: function (card) {
+                    openStandardLampaCard(card, function () { openYummyForMovie({yani_card: card}); });
+                },
                 openResults: function (query) {
                     Lampa.Activity.push({
                         url: 'yani/search/' + encodeURIComponent(query),

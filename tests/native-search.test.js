@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const context={window:{},setTimeout,clearTimeout};
+vm.runInNewContext(fs.readFileSync('src/ui-search.js','utf8'),context);
+let params,opened=0,closed=0,backed=0;
+const controller=context.window.LampaYaniSearch.create({lampa:{Search:{open(p){params=p;}}},openNativeCard(card){assert.equal(card.yani_id,27105);opened++;},api:{},toCard:x=>x});
+controller.openNative(()=>backed++);
+assert.equal(params.sources.length,1);
+assert.equal(params.sources[0].title,'YummyAnime');
+params.sources[0].onSelect({element:{yani_id:27105}},()=>closed++);
+assert.equal(opened,1);assert.equal(closed,1);params.onBack();assert.equal(backed,1);
+console.log('native search tests passed');

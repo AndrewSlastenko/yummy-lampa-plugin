@@ -16,7 +16,7 @@ assert.doesNotMatch(ui, /function findStandardLampaCard\(/);
 assert.doesNotMatch(ui, /function installFullRating\(/);
 assert.doesNotMatch(ui, /function findYummyMatches\(/);
 assert.match(ui, /function openYummyDetail\(/);
-assert.match(source, /function openStandardLampaCard\(card\)/);
+assert.match(source, /function openStandardLampaCard\(card, fallback\)/);
 assert.match(source, /function findStandardLampaCard\(card\)/);
 assert.match(source, /function installFullRating\(\)/);
 assert.match(source, /yani-full-rating-label/, 'native Lampa rating must use YA text, not a logo');
@@ -91,5 +91,29 @@ assert.strictEqual(api.isValidNativeId('undefined'), false);
 assert.strictEqual(api.isValidNativeId(null), false);
 assert.strictEqual(api.isNativeAnimeCard({genre_ids: [16]}), true);
 assert.strictEqual(api.isNativeAnimeCard({genre_ids: [18]}), false);
+
+let finishLookup, nativeFallback=0, customDetail=0;
+context.Lampa=context.window.Lampa;
+context.LampaYaniApi=context.window.LampaYaniApi;
+context.LampaYaniUiUtils=context.window.LampaYaniUiUtils;
+context.setTimeout=function(fn,ms){if(ms===20000)finishLookup=fn;return 1;};
+const fallbackApi=context.window.LampaYaniStandardCard.create({
+    getYummyId:card=>card.yani_id,
+    hasYummyCardData:()=>true,
+    openYummyDetail(){customDetail++;}
+});
+fallbackApi.openStandardLampaCard({yani_id:27105},()=>nativeFallback++);
+finishLookup();
+assert.equal(nativeFallback,1,'missing TMDB match must allow playback without custom detail');
+assert.equal(customDetail,0);
+fallbackApi.openStandardLampaCard({yani_id:27105});
+finishLookup();
+assert.equal(customDetail,1,'existing callers retain their original fallback');
+let cancelLookup;
+context.Lampa.Loading.start=fn=>{cancelLookup=fn;};
+fallbackApi.openStandardLampaCard({yani_id:27105},()=>nativeFallback++);
+assert.equal(typeof cancelLookup,'function','Back must cancel the native-card lookup');
+cancelLookup();finishLookup();
+assert.equal(nativeFallback,1,'cancelled lookup must not fall back into playback');
 
 console.log('standard card module contract checks passed');

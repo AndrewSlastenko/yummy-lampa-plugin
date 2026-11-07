@@ -13,21 +13,25 @@
         var toCard = deps.toCard || function (item) { return item; };
         var formatRating = deps.formatRating || function (value) { return String(value || ''); };
 
-        function openStandardLampaCard(card) {
+        function openStandardLampaCard(card, fallback) {
             // Resolve a real TMDB card before opening Lampa's native detail page.
             // Never call `full` with an absent id: some Lampa builds then request
             // `/movie/undefined` forever.  A YummyAnime detail remains a useful
             // fallback when TMDB has no equivalent title.
             var settled = false;
-            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start();
+            var lookupTimer;
+            if (Lampa.Loading && Lampa.Loading.start) Lampa.Loading.start(function () { finish(null, true); });
 
-            function finish(match) {
+            function finish(match, cancelled) {
                 if (settled) return;
                 settled = true;
+                clearTimeout(lookupTimer);
                 if (Lampa.Loading && Lampa.Loading.stop) Lampa.Loading.stop();
+                if (cancelled) return;
 
                 if (!match || !match.card || !isValidNativeId(match.card.id) || !match.method) {
-                    openYummyDetail(card, true);
+                    if (typeof fallback === 'function') fallback(card);
+                    else openYummyDetail(card, true);
                     return;
                 }
 
@@ -47,7 +51,7 @@
             // Do not leave the UI blocked if a third-party TMDB proxy silently
             // drops a request. The normal request callbacks still win when they
             // finish in time.
-            setTimeout(function () { finish(null); }, 20000);
+            lookupTimer = setTimeout(function () { finish(null); }, 20000);
             enrichCardForStandardSearch(card).then(findStandardLampaCard).then(finish).catch(function (error) {
                 console.warn('[YummyAnime] Native Lampa card lookup failed', error);
                 finish(null);

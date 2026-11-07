@@ -335,6 +335,13 @@
                     ensureRemoteHistory();
                     registerOnlineSource();
                     registerSearchSource();
+                    LampaYaniNativeShell.install({
+                        lampa: Lampa,
+                        $: $,
+                        isAnime: function (movie) { return Boolean(movie.yani_card) || standardCard.isNativeAnimeCard(movie); },
+                        openPlayback: openYummyForMovie,
+                        openSearch: function (onBack) { getSearchController().openNative(onBack); }
+                    });
                     registerAndroidDirectVideoTube();
                 } catch (settingsError) {
                     console.error('[YummyAnime] Settings registration failed', settingsError);
@@ -3112,6 +3119,9 @@
                 searchTitle: t('search_title'),
                 showInput: showYummyInput,
                 openDetail: function (card) { openYummyDetail(card, false); },
+                openNativeCard: function (card) {
+                    openStandardLampaCard(card, function () { openYummyForMovie({yani_card: card}); });
+                },
                 openResults: function (query) {
                     Lampa.Activity.push({
                         url: 'yani/search/' + encodeURIComponent(query),

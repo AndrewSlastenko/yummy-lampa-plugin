@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = {window:{}};
+vm.runInNewContext(fs.readFileSync('src/ui-native-shell.js','utf8'),context);
+const api=context.window.LampaYaniNativeShell;
+assert.equal(api.isAnimeCategory({component:'category_full',title:'Аниме',source:'tmdb'}),true);
+assert.equal(api.isAnimeCategory({component:'category_full',title:'Фильмы'}),false);
+assert.equal(api.isAnimeCategory({component:'full',title:'Аниме'}),false);
+assert.equal(api.isAnimeCategory({component:'category',url:'anime',title:'Аниме - CUB',source:'cub'}),true);
+let active={component:'bwa_online',movie:{anime:true}},menu,played=0,delegated=0,closed=0,searches=0,head=[];
+const components={category_full:function(){return {start(){},pause(){},stop(){},destroy(){}};}};
+components.category=components.category_full;
+const L={Component:{get:n=>components[n],add(n,c){components[n]=c;}},Activity:{active:()=>active},
+ Select:{show(o){menu=o;return 'shown';},close(){closed++;}},Head:{addElement(e,action){e.action=action;head.push(e);}},Controller:{toggle(n){assert.equal(n,'head');}}};
+function $(html){return {html,on(){return this;},remove(){head=head.filter(e=>e!==this);}};}
+const deps={lampa:L,$,isAnime:m=>!!m.anime,openPlayback(m){assert.equal(m.anime,true);played++;},openSearch(back){searches++;back();}};
+assert.equal(api.install(deps),true);
+assert.equal(api.install(deps),false);
+const original={title:'Источники',items:[{source:'veoveo',title:'VeoVeo'}],onSelect(){delegated++;}};
+assert.equal(L.Select.show(original),'shown');
+assert.equal(original.items.length,1,'never mutate BWA menu');
+assert.equal(menu.items.filter(x=>x.source==='yummyanime').length,1);
+menu.onSelect(menu.items.find(x=>x.source==='yummyanime'));
+assert.equal(played,1);assert.equal(closed,1);
+menu.onSelect(menu.items.find(x=>x.source==='veoveo'));assert.equal(delegated,1);
+const stale=menu;active={component:'full',movie:{anime:true}};stale.onSelect(stale.items.find(x=>x.source==='yummyanime'));assert.equal(played,1);
+L.Select.show(original);assert.equal(menu,original,'outside Online is untouched');
+active={component:'bwa_online',movie:{anime:false}};L.Select.show(original);assert.equal(menu,original,'ordinary films unchanged');
+active={component:'bwa_online',movie:{anime:true}};const unrelated={items:[{title:'Озвучка'}]};L.Select.show(unrelated);assert.equal(menu,unrelated);
+const anime=components.category_full({component:'category_full',title:'Аниме'});anime.start();anime.start();assert.equal(head.length,1);
+head[0].action();assert.equal(searches,1);anime.pause();assert.equal(head.length,0);anime.start();assert.equal(head.length,1);anime.destroy();assert.equal(head.length,0);
+components.category_full({component:'category_full',title:'Фильмы'}).start();assert.equal(head.length,0);
+const replacement=function(){return {start(){},stop(){}};};L.Component.add('category_full',replacement);
+const replaced=components.category_full({component:'category_full',title:'Аниме'});replaced.start();assert.equal(head.length,1);replaced.stop();assert.equal(head.length,0);
+const native=components.category({component:'category',url:'anime',title:'Аниме - CUB'});native.start();assert.equal(head.length,1);native.pause();assert.equal(head.length,0);
+console.log('native shell tests passed');

@@ -131,10 +131,8 @@
             }, delay);
         }
 
-        function register() {
-            if (!lampa || !lampa.Search || !lampa.Search.addSource || window.yummyanime_search_source_ready) return false;
-            window.yummyanime_search_source_ready = true;
-            lampa.Search.addSource({
+        function source(native) {
+            return {
                 title: options.sourceTitle || 'YummyAnime',
                 // Lampa Results.empty reads source.params.start_typing / nofound
                 // immediately on create. Missing params crashes global Search.
@@ -144,10 +142,22 @@
                 search: search,
                 onSelect: function (params, close) {
                     if (typeof close === 'function') close();
-                    if (options.openDetail) options.openDetail(params && params.element);
+                    var openCard = native ? options.openNativeCard : options.openDetail;
+                    if (openCard) openCard(params && params.element);
                 }
-            });
+            };
+        }
+
+        function register() {
+            if (!lampa || !lampa.Search || !lampa.Search.addSource || window.yummyanime_search_source_ready) return false;
+            window.yummyanime_search_source_ready = true;
+            lampa.Search.addSource(source(false));
             return true;
+        }
+
+        function openNative(onBack) {
+            if (!lampa || !lampa.Search || !lampa.Search.open) return;
+            lampa.Search.open({sources: [source(true)], onBack: onBack});
         }
 
         function open() {
@@ -167,7 +177,7 @@
             pendingComplete = null;
         }
 
-        return {search: search, register: register, open: open, destroy: destroy};
+        return {search: search, register: register, open: open, openNative: openNative, destroy: destroy};
     }
 
     window.LampaYani = window.LampaYani || {};
